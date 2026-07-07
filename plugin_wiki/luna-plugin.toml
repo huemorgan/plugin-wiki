@@ -2,13 +2,16 @@
 # Keep in sync with PluginManifest in __init__.py.
 
 name = "plugin-wiki"
-version = "0.1.0"
+shown_name = "Wiki"
+version = "0.2.0"
 description = "Mission knowledge base: wiki pages, revisions, citations, open questions."
 entry = "plugin_wiki"
 sdk_version = "0"
 license = "MIT"
+category = "global"
 tags = ["knowledge", "wiki", "memory"]
 provider = "wiki"
+db_tables = ["wiki_pages", "wiki_revisions", "wiki_citations", "wiki_open_questions", "wiki_links"]
 readme = """
 # plugin-wiki
 
@@ -21,4 +24,59 @@ via the `wiki` provider.
 """
 
 [requires]
-tools = 1
+tools = 9
+tables = 5
+
+[[tools]]
+name = "wiki_toc"
+description = "Table of contents: every page's slug, title, summary."
+policy = "auto_approve"
+risk_level = "low"
+
+[[tools]]
+name = "wiki_read"
+description = "Read a page's full markdown body."
+policy = "auto_approve"
+risk_level = "low"
+
+[[tools]]
+name = "wiki_search"
+description = "Relevance-ranked page summaries for a query."
+policy = "auto_approve"
+risk_level = "low"
+
+[[tools]]
+name = "wiki_write"
+description = "Create or replace a wiki page (records a revision)."
+policy = "auto_approve"
+risk_level = "low"
+
+[[tools]]
+name = "wiki_patch"
+description = "Edit part of a page via find/replace (records a revision)."
+policy = "auto_approve"
+risk_level = "low"
+
+[[tools]]
+name = "wiki_cite"
+description = "Attach a source URL to a page."
+policy = "auto_approve"
+risk_level = "low"
+
+[[tools]]
+name = "wiki_ask"
+description = "Record an open question for later research."
+policy = "auto_approve"
+risk_level = "low"
+
+[[tools]]
+name = "wiki_resolve_question"
+description = "Mark an open question resolved."
+policy = "auto_approve"
+risk_level = "low"
+
+[[tools]]
+name = "wiki_list_questions"
+description = "List open or resolved wiki questions."
+policy = "auto_approve"
+risk_level = "low"
