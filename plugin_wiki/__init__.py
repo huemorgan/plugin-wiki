@@ -26,7 +26,7 @@ class WikiPlugin(LunaPlugin):
         name="plugin-wiki",
         shown_name="Wiki",
         icon="book-open",
-        version="0.2.0",
+        version="0.3.0",
         description="Mission knowledge base: wiki pages, revisions, citations, open questions.",
         category="global",
         license="MIT",
@@ -46,6 +46,12 @@ class WikiPlugin(LunaPlugin):
             for table in ALL_TABLES:
                 await conn.run_sync(table.create, checkfirst=True)
         self._store = WikiStore(ctx.db_session_factory)
+
+        async def _on_change(evt: dict) -> None:
+            # live-update feed for the wiki pane (SSE /api/events?topics=wiki.*)
+            await ctx.events.emit("wiki.updated", evt)
+
+        self._store.on_change = _on_change
         register_tools(ctx, self._store)
         ctx.provider_registry.register("wiki", WikiProvider(self._store))
         log.info("plugin-wiki loaded (tools=9, tables=%d)", len(ALL_TABLES))

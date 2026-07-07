@@ -47,6 +47,17 @@ def _page_meta(p: WikiPage) -> dict[str, Any]:
 class WikiStore:
     def __init__(self, session_factory) -> None:
         self._sf = session_factory
+        # async callback({action, slug}) fired after each committed mutation —
+        # the plugin wires this to the event bus so UIs can live-update.
+        self.on_change = None
+
+    async def _changed(self, action: str, slug: str | None) -> None:
+        if self.on_change is None:
+            return
+        try:
+            await self.on_change({"action": action, "slug": slug})
+        except Exception:  # noqa: BLE001 — a UI-notify failure must never fail the write
+            pass
 
     # ── pages ──────────────────────────────────────────────────────────
 
@@ -80,7 +91,8 @@ class WikiStore:
             s.add(WikiRevision(page_id=page.id, body=body, note=note))
             links = await self._reparse_links(s, slug, body)
             await s.commit()
-            return {**_page_meta(page), "created": created, "links": links}
+        await self._changed("write", slug)
+        return {**_page_meta(page), "created": created, "links": links}
 
     async def patch_page(self, slug: str, find: str, replace: str, note: str = "") -> dict[str, Any]:
         """Literal find/replace edit. `find` must occur exactly once so edits
@@ -102,7 +114,8 @@ class WikiStore:
             s.add(WikiRevision(page_id=page.id, body=page.body, note=note or "patch"))
             links = await self._reparse_links(s, slug, page.body)
             await s.commit()
-            return {**_page_meta(page), "links": links}
+        await self._changed("patch", slug)
+        return {**_page_meta(page), "links": links}
 
     async def get_page(self, slug: str) -> dict[str, Any]:
         slug = slugify(slug)
@@ -204,7 +217,8 @@ class WikiStore:
             # citation is the second edge kind: page → source
             s.add(WikiLink(from_page=slug, to_page=url, kind="citation"))
             await s.commit()
-            return {"slug": slug, "url": url}
+        await self._changed("cite", slug)
+        return {"slug": slug, "url": url}
 
     async def add_question(self, question: str, slug: str | None = None) -> dict[str, Any]:
         async with self._sf() as s:
@@ -217,7 +231,9 @@ class WikiStore:
             q = WikiOpenQuestion(page_id=page_id, question=question)
             s.add(q)
             await s.commit()
-            return {"id": str(q.id), "question": question, "status": q.status}
+            out = {"id": str(q.id), "question": question, "status": q.status}
+        await self._changed("ask", slug)
+        return out
 
     async def resolve_question(self, question_id: str) -> dict[str, Any]:
         import uuid as _uuid
@@ -232,7 +248,9 @@ class WikiStore:
                 raise PageNotFound(question_id)
             q.status = "resolved"
             await s.commit()
-            return {"id": str(q.id), "status": q.status}
+            out = {"id": str(q.id), "status": q.status}
+        await self._changed("resolve", None)
+        return out
 
     async def list_questions(self, status: str = "open") -> list[dict[str, Any]]:
         async with self._sf() as s:
