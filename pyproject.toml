@@ -1,0 +1,13 @@
+[project]
+name = "plugin-wiki"
+version = "0.1.0"
+description = "Luna mission knowledge base: wiki pages, revisions, citations, open questions."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+
+[tool.setuptools]
+packages = ["plugin_wiki"]
+
+[tool.setuptools.package-data]
+plugin_wiki = ["luna-plugin.toml"]

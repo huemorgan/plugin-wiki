@@ -1,0 +1,24 @@
+# Data manifest — read by the marketplace + installer without importing Python.
+# Keep in sync with PluginManifest in __init__.py.
+
+name = "plugin-wiki"
+version = "0.1.0"
+description = "Mission knowledge base: wiki pages, revisions, citations, open questions."
+entry = "plugin_wiki"
+sdk_version = "0"
+license = "MIT"
+tags = ["knowledge", "wiki", "memory"]
+provider = "wiki"
+readme = """
+# plugin-wiki
+
+Luna's mission knowledge base — a Karpathy-style LLM wiki. Authored, revisable
+markdown pages with [[wikilinks]], citations, and open questions. Knowledge
+accumulates by compile-time synthesis (authored pages), not query-time RAG.
+
+Substrate only: other plugins (e.g. plugin-curiosity) drive who writes and when,
+via the `wiki` provider.
+"""
+
+[requires]
+tools = 1
