@@ -3,7 +3,7 @@
 
 name = "plugin-wiki"
 shown_name = "Wiki"
-version = "0.3.1"
+version = "0.3.2"
 description = "Mission knowledge base: wiki pages, revisions, citations, open questions."
 entry = "plugin_wiki"
 sdk_version = "0"

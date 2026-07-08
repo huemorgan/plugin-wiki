@@ -26,7 +26,7 @@ class WikiPlugin(LunaPlugin):
         name="plugin-wiki",
         shown_name="Wiki",
         icon="book-open",
-        version="0.3.0",
+        version="0.3.2",
         description="Mission knowledge base: wiki pages, revisions, citations, open questions.",
         category="global",
         license="MIT",
@@ -53,7 +53,15 @@ class WikiPlugin(LunaPlugin):
 
         self._store.on_change = _on_change
         register_tools(ctx, self._store)
-        ctx.provider_registry.register("wiki", WikiProvider(self._store))
+        # Idempotent on purpose: core teardown (pre-provider-unregister
+        # versions) leaves the old registration behind on upgrade, and
+        # register() raises on duplicates — which rolled back every update.
+        provider = WikiProvider(self._store)
+        registry = ctx.provider_registry
+        if getattr(registry, "has", None) and registry.has("wiki"):
+            registry.replace("wiki", provider)
+        else:
+            registry.register("wiki", provider)
         log.info("plugin-wiki loaded (tools=9, tables=%d)", len(ALL_TABLES))
 
     async def prompt_sections(self) -> list[str]:

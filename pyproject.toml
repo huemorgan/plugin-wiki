@@ -1,6 +1,6 @@
 [project]
 name = "plugin-wiki"
-version = "0.1.0"
+version = "0.3.2"
 description = "Luna mission knowledge base: wiki pages, revisions, citations, open questions."
 readme = "README.md"
 requires-python = ">=3.12"
