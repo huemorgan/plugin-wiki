@@ -6,6 +6,7 @@ IS authoring the graph."""
 from __future__ import annotations
 
 import re
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import delete, func, select
@@ -35,12 +36,24 @@ def parse_wikilinks(body: str) -> list[str]:
     return seen
 
 
+def _age_days(dt) -> float | None:
+    # Server-computed age so callers (and the agent) never do date math —
+    # the model has no clock, so a raw ISO timestamp can't answer "recent?".
+    if dt is None:
+        return None
+    now = datetime.now(UTC)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return round((now - dt).total_seconds() / 86400, 1)
+
+
 def _page_meta(p: WikiPage) -> dict[str, Any]:
     return {
         "slug": p.slug,
         "title": p.title,
         "summary": p.summary,
         "updated_at": p.updated_at.isoformat() if p.updated_at else None,
+        "age_days": _age_days(p.updated_at),
     }
 
 
