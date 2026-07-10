@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Search, BookOpen, ChevronDown, Plus, Library } from 'lucide-react'
 import {
   fetchGraph,
@@ -10,12 +10,32 @@ import {
   type WikiMeta,
 } from './lib/api'
 import { subscribeWikiUpdates } from './lib/events'
+import { cn } from './lib/cn'
 import { GraphView } from './GraphView'
 import { PageView } from './PageView'
+import { PageList } from './PageList'
+import { flyTitles, reducedMotion, type Flight, type FlightRect } from './flight'
 
-type View = { type: 'graph' } | { type: 'page'; slug: string }
+/** 002 state machine: 'opening'/'closing' are the only states where
+ * choreography code runs; the graph stays mounted through all four. */
+type View =
+  | { type: 'graph' }
+  | { type: 'opening'; slug: string }
+  | { type: 'page'; slug: string }
+  | { type: 'closing'; slug: string }
 
 const WIKI_KEY = 'luna.wiki.current'
+const LIST_W = 280 // px — keep in sync with .wiki-rail / .wiki-panel in index.css
+
+const nextFrame = () =>
+  new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())))
+
+const relTo = (r: DOMRect, origin: DOMRect): FlightRect => ({
+  left: r.left - origin.left,
+  top: r.top - origin.top,
+  width: r.width,
+  height: r.height,
+})
 
 /** Header dropdown: switch between isolated wikis, create a new one. */
 function WikiSwitcher({
@@ -175,9 +195,21 @@ export function App() {
   const [refreshKey, setRefreshKey] = useState(0)
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<PageMeta[]>([])
+  // choreography phases: slid drives the rail/panel/scrim transitions,
+  // landed flips the list rows visible after the ghost flight
+  const [slid, setSlid] = useState(false)
+  const [landed, setLanded] = useState(false)
+  const [panelReady, setPanelReady] = useState(false)
   const glowTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const wikiRef = useRef(currentWiki)
   wikiRef.current = currentWiki
+  const viewRef = useRef(view)
+  viewRef.current = view
+  const pendingGraph = useRef(false)
+  const mainRef = useRef<HTMLElement | null>(null)
+  const railRef = useRef<HTMLDivElement | null>(null)
+  const panelRef = useRef<HTMLDivElement | null>(null)
+  const ghostRef = useRef<HTMLDivElement | null>(null)
 
   const loadWikis = useCallback(() => {
     fetchWikis()
@@ -205,16 +237,23 @@ export function App() {
     localStorage.setItem(WIKI_KEY, currentWiki)
     setGraph(null)
     setView({ type: 'graph' })
+    setSlid(false)
+    setLanded(false)
+    setPanelReady(false)
     loadGraph()
   }, [currentWiki, loadGraph])
 
   // Live updates: agent writes refresh the wiki list (counts, descriptions)
   // always, and the graph + open page only when they touch the current wiki.
+  // A graph refetch mid-flight would re-render the nodes the ghosts were
+  // measured against — defer it until the transition settles.
   useEffect(() => {
     const unsub = subscribeWikiUpdates((u) => {
       loadWikis()
       if (u.wiki && u.wiki !== wikiRef.current) return
-      loadGraph()
+      const vt = viewRef.current.type
+      if (vt === 'opening' || vt === 'closing') pendingGraph.current = true
+      else loadGraph()
       setRefreshKey((k) => k + 1)
       setUpdatedSlug(u.slug)
       if (glowTimer.current) clearTimeout(glowTimer.current)
@@ -225,6 +264,13 @@ export function App() {
       if (glowTimer.current) clearTimeout(glowTimer.current)
     }
   }, [loadGraph, loadWikis])
+
+  useEffect(() => {
+    if ((view.type === 'graph' || view.type === 'page') && pendingGraph.current) {
+      pendingGraph.current = false
+      loadGraph()
+    }
+  }, [view.type, loadGraph])
 
   // debounced search (scoped to the current wiki)
   useEffect(() => {
@@ -240,11 +286,135 @@ export function App() {
     return () => clearTimeout(t)
   }, [query, currentWiki])
 
+  // Top-10 = the pages that structure this wiki: wikilink degree (in+out)
+  // desc, tie-break updated_at recency. Also feeds the rail's row order.
+  const pageNodes = useMemo(
+    () => (graph ? graph.nodes.filter((n) => n.kind === 'page') : []),
+    [graph],
+  )
+  const topSlugs = useMemo(() => {
+    const deg = new Map<string, number>()
+    graph?.edges.forEach((e) => {
+      if (e.kind !== 'wikilink') return
+      deg.set(e.source, (deg.get(e.source) || 0) + 1)
+      deg.set(e.target, (deg.get(e.target) || 0) + 1)
+    })
+    return [...pageNodes]
+      .sort(
+        (a, b) =>
+          (deg.get(b.id) || 0) - (deg.get(a.id) || 0) ||
+          (b.updated_at || '').localeCompare(a.updated_at || ''),
+      )
+      .slice(0, 10)
+      .map((n) => n.id)
+  }, [graph, pageNodes])
+  const listPages = useMemo(
+    () => pageNodes.map((n) => ({ slug: n.id, title: n.label })),
+    [pageNodes],
+  )
+  const titleOf = useCallback(
+    (slug: string) => pageNodes.find((n) => n.id === slug)?.label || slug,
+    [pageNodes],
+  )
+
   const openPage = useCallback((slug: string) => {
-    setView({ type: 'page', slug })
     setQuery('')
     setResults([])
+    setView((v) => {
+      if (v.type === 'closing') return v // let the close finish
+      if (v.type === 'graph') return { type: 'opening', slug }
+      return { ...v, slug } // in-page nav: swap content, no choreography
+    })
   }, [])
+
+  const closePage = useCallback(() => {
+    setView((v) => (v.type === 'page' ? { type: 'closing', slug: v.slug } : v))
+  }, [])
+
+  // Open choreography: slide overlays in, fly the top-10 titles from their
+  // node rects onto their (still hidden) list rows, then land.
+  useEffect(() => {
+    if (view.type !== 'opening') return
+    let cancelled = false
+    const fallback = setTimeout(() => setPanelReady(true), 700) // lost transitionend
+    ;(async () => {
+      await nextFrame() // overlays painted at their offscreen transform
+      if (cancelled) return
+      setSlid(true)
+      if (reducedMotion()) setPanelReady(true)
+      const main = mainRef.current
+      const rail = railRef.current
+      const layer = ghostRef.current
+      if (main && rail && layer && !reducedMotion()) {
+        // one read pass: node rects + row rects. The rail is mid-slide, so
+        // project each row to the rail's final position (left: 0 in main).
+        const mainRect = main.getBoundingClientRect()
+        const dx = mainRect.left - rail.getBoundingClientRect().left
+        const flights: Flight[] = []
+        for (const s of topSlugs) {
+          const nodeEl = main.querySelector(`[data-testid="wiki-node-${CSS.escape(s)}"]`)
+          const rowEl = rail.querySelector(`[data-wiki-row="${CSS.escape(s)}"]`)
+          if (!nodeEl || !rowEl) continue
+          const to = relTo(rowEl.getBoundingClientRect(), mainRect)
+          to.left += dx
+          flights.push({ text: titleOf(s), from: relTo(nodeEl.getBoundingClientRect(), mainRect), to })
+        }
+        await flyTitles(flights, layer)
+      }
+      if (cancelled) return
+      setLanded(true)
+      setView((v) => (v.type === 'opening' ? { type: 'page', slug: v.slug } : v))
+    })()
+    return () => {
+      cancelled = true
+      clearTimeout(fallback)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view.type])
+
+  // Close choreography: measure rows and CURRENT node positions (the user
+  // may have panned/zoomed before opening), fly back — nodes outside the
+  // visible area get a fade instead of an offscreen flight — while the
+  // panel/rail slide out; then return to 'graph'.
+  useEffect(() => {
+    if (view.type !== 'closing') return
+    let cancelled = false
+    ;(async () => {
+      const main = mainRef.current
+      const rail = railRef.current
+      const layer = ghostRef.current
+      const flights: Flight[] = []
+      if (main && rail && layer && !reducedMotion()) {
+        const mainRect = main.getBoundingClientRect()
+        for (const s of topSlugs) {
+          const rowEl = rail.querySelector(`[data-wiki-row="${CSS.escape(s)}"]`)
+          if (!rowEl) continue
+          const nodeEl = main.querySelector(`[data-testid="wiki-node-${CSS.escape(s)}"]`)
+          let to: FlightRect | null = null
+          if (nodeEl) {
+            const nr = nodeEl.getBoundingClientRect()
+            const visible =
+              nr.right > mainRect.left && nr.left < mainRect.right &&
+              nr.bottom > mainRect.top && nr.top < mainRect.bottom
+            if (visible) to = relTo(nr, mainRect)
+          }
+          flights.push({ text: titleOf(s), from: relTo(rowEl.getBoundingClientRect(), mainRect), to })
+        }
+      }
+      setLanded(false) // top rows hide (ghosts take over), rest fade out
+      setSlid(false)
+      setPanelReady(false)
+      const slide = new Promise((r) => setTimeout(r, reducedMotion() ? 0 : 340))
+      if (layer) await Promise.all([flyTitles(flights, layer), slide])
+      else await slide
+      if (cancelled) return
+      setView({ type: 'graph' })
+    })()
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view.type])
 
   const handleCreateWiki = useCallback(async (name: string, description: string) => {
     const slug = slugifyClient(name)
@@ -258,7 +428,7 @@ export function App() {
     <div className="h-full flex flex-col" data-testid="wiki-app">
       <header className="flex items-center gap-3 px-4 py-2.5 border-b border-ink-800 shrink-0">
         <button
-          onClick={() => setView({ type: 'graph' })}
+          onClick={closePage}
           className="flex items-center gap-2 text-sm font-semibold text-ink-100 hover:text-luna-300"
           data-testid="wiki-home"
         >
@@ -306,13 +476,16 @@ export function App() {
         )}
       </header>
 
-      <main className="flex-1 min-h-0">
+      {/* The graph is mounted for the whole session; opening a page slides
+          compositor-only overlays (rail, panel, scrim, ghost layer) over it —
+          its viewport, node positions and canvas are never reset. */}
+      <main ref={mainRef} className="flex-1 min-h-0 relative overflow-hidden">
         {error && (
           <div className="p-6 text-sm text-red-400" data-testid="wiki-error">
             {error}
           </div>
         )}
-        {!error && view.type === 'graph' && (
+        {!error && (
           <>
             {!graph && <div className="p-6 text-sm text-ink-500">Loading graph…</div>}
             {graph && graph.nodes.length === 0 && (
@@ -321,18 +494,52 @@ export function App() {
               </div>
             )}
             {graph && graph.nodes.length > 0 && (
-              <GraphView graph={graph} updatedSlug={updatedSlug} onOpenPage={openPage} />
+              <GraphView
+                graph={graph}
+                updatedSlug={updatedSlug}
+                onOpenPage={openPage}
+                covered={view.type !== 'graph'}
+              />
+            )}
+            {view.type !== 'graph' && graph && (
+              <>
+                <div className={cn('wiki-scrim', slid && 'wiki-scrim-on')} data-testid="wiki-scrim" />
+                <div
+                  ref={railRef}
+                  className={cn('wiki-rail', slid && 'wiki-rail-open')}
+                  data-testid="wiki-list-rail"
+                >
+                  <PageList
+                    pages={listPages}
+                    topSlugs={topSlugs}
+                    activeSlug={view.slug}
+                    landed={landed}
+                    onOpen={openPage}
+                  />
+                </div>
+                <div
+                  ref={panelRef}
+                  className={cn('wiki-panel', slid && 'wiki-panel-open')}
+                  style={{ left: LIST_W }}
+                  data-testid="wiki-page-panel"
+                  onTransitionEnd={(e) => {
+                    if (e.target === panelRef.current && e.propertyName === 'transform' && slid)
+                      setPanelReady(true)
+                  }}
+                >
+                  <PageView
+                    wiki={currentWiki}
+                    slug={view.slug}
+                    refreshKey={refreshKey}
+                    panelReady={panelReady}
+                    onClose={closePage}
+                    onNavigate={openPage}
+                  />
+                </div>
+                <div ref={ghostRef} className="wiki-ghost-layer" data-testid="wiki-ghost-layer" />
+              </>
             )}
           </>
-        )}
-        {!error && view.type === 'page' && (
-          <PageView
-            wiki={currentWiki}
-            slug={view.slug}
-            refreshKey={refreshKey}
-            onBack={() => setView({ type: 'graph' })}
-            onNavigate={openPage}
-          />
         )}
       </main>
     </div>

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { ArrowLeft, Clock, ExternalLink, HelpCircle } from 'lucide-react'
+import { Clock, ExternalLink, HelpCircle, X } from 'lucide-react'
 import {
   fetchPage,
   fetchRevisions,
@@ -21,19 +21,27 @@ export function PageView({
   wiki,
   slug,
   refreshKey,
-  onBack,
+  panelReady = true,
+  onClose,
   onNavigate,
 }: {
   wiki: string
   slug: string
   refreshKey: number
-  onBack: () => void
+  /** 002: hold the spinner until the panel slide finishes — rendering the
+   * markdown mid-slide is the one main-thread hit that can stutter it */
+  panelReady?: boolean
+  onClose: () => void
   onNavigate: (slug: string) => void
 }) {
   const [page, setPage] = useState<Page | null>(null)
   const [revisions, setRevisions] = useState<Revision[]>([])
   const [questions, setQuestions] = useState<Question[]>([])
   const [error, setError] = useState<string | null>(null)
+
+  // in-page wikilink nav swaps content: blank to the spinner on slug change
+  // (but not on refreshKey bumps from live updates)
+  useEffect(() => setPage(null), [wiki, slug])
 
   useEffect(() => {
     let alive = true
@@ -51,28 +59,17 @@ export function PageView({
     }
   }, [wiki, slug, refreshKey])
 
-  if (error)
-    return (
-      <div className="p-6 text-sm text-red-400" data-testid="wiki-page-error">
-        {error}
-        <button onClick={onBack} className="block mt-3 text-luna-300 hover:underline">
-          Back to graph
-        </button>
-      </div>
-    )
-  if (!page) return <div className="p-6 text-sm text-ink-500">Loading page…</div>
-
-  return (
+  const body = error ? (
+    <div className="p-6 text-sm text-red-400" data-testid="wiki-page-error">
+      {error}
+    </div>
+  ) : !page || !panelReady ? (
+    <div className="h-full flex items-center justify-center" data-testid="wiki-page-loading">
+      <div className="wiki-spinner" />
+    </div>
+  ) : (
     <div className="h-full overflow-y-auto" data-testid="wiki-page">
-      <div className="max-w-3xl mx-auto px-6 py-5">
-        <button
-          onClick={onBack}
-          data-testid="wiki-page-back"
-          className="flex items-center gap-1.5 text-xs text-ink-400 hover:text-ink-200 mb-4"
-        >
-          <ArrowLeft size={13} /> Graph
-        </button>
-
+      <div className="max-w-3xl mx-auto px-6 py-5 wiki-page-fade">
         <h1 className="text-xl font-semibold text-ink-100" data-testid="wiki-page-title">
           {page.title || page.slug}
         </h1>
@@ -177,6 +174,20 @@ export function PageView({
           </section>
         )}
       </div>
+    </div>
+  )
+
+  return (
+    <div className="h-full relative" data-testid="wiki-page-panel-content">
+      <button
+        onClick={onClose}
+        data-testid="wiki-page-close"
+        aria-label="Close page"
+        className="absolute top-3 right-3 z-10 p-1.5 rounded-md text-ink-400 hover:text-ink-100 hover:bg-ink-800"
+      >
+        <X size={15} />
+      </button>
+      {body}
     </div>
   )
 }

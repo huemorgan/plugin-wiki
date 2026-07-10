@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ReactFlow,
   Background,
@@ -83,21 +83,30 @@ export function GraphView({
   graph,
   updatedSlug,
   onOpenPage,
+  covered = false,
 }: {
   graph: Graph
   updatedSlug: string | null
   onOpenPage: (slug: string) => void
+  /** overlays are on top (002): suppress hover, ignore stray pointer events */
+  covered?: boolean
 }) {
   const { nodes, edges } = useMemo(() => layout(graph, updatedSlug), [graph, updatedSlug])
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [hover, setHover] = useState<Hover | null>(null)
+  const coveredRef = useRef(covered)
+  coveredRef.current = covered
 
   const clearHover = useCallback(() => setHover(null), [])
+
+  useEffect(() => {
+    if (covered) setHover(null)
+  }, [covered])
 
   const onEnter = useCallback((event: React.MouseEvent, n: Node) => {
     const container = containerRef.current
     const el = (event.target as HTMLElement).closest('.react-flow__node')
-    if (!container || !el) return
+    if (!container || !el || coveredRef.current) return
     const c = container.getBoundingClientRect()
     const r = el.getBoundingClientRect()
     const below = r.top - c.top < 120 // no room above → flip under the node
