@@ -1,5 +1,8 @@
 """Agent-facing wiki tools. Thin handlers over WikiStore. Writes touch only
-plugin-owned tables, so all tools use the default auto_approve policy."""
+plugin-owned tables, so all tools use the default auto_approve policy.
+
+0.4.0: every tool takes an optional `wiki` (slug, default `main`); three new
+tools let the agent create and navigate isolated wikis."""
 
 from __future__ import annotations
 
@@ -7,46 +10,103 @@ from typing import Any
 
 from luna_sdk import PluginContext, ToolDef
 
-from .store import PageNotFound, WikiStore
+from .models import DEFAULT_WIKI
+from .store import PageNotFound, WikiNotFound, WikiStore
+
+_WIKI_PARAM = {
+    "type": "string",
+    "description": "Wiki slug to operate in (see wiki_list_wikis). Omit for the main wiki.",
+}
 
 
 def register_tools(ctx: PluginContext, store: WikiStore) -> None:
-    async def _toc() -> dict[str, Any]:
-        return {"pages": await store.toc()}
+    async def _no_such_wiki(wiki: str) -> dict[str, Any]:
+        return {"error": f"no wiki '{wiki}'", "wikis": await store.list_wikis()}
 
-    async def _read(slug: str) -> dict[str, Any]:
+    async def _list_wikis() -> dict[str, Any]:
+        return {"wikis": await store.list_wikis()}
+
+    async def _create_wiki(slug: str, name: str, description: str = "") -> dict[str, Any]:
         try:
-            return await store.get_page(slug)
-        except PageNotFound:
-            return {"error": f"no wiki page '{slug}'", "pages": await store.toc()}
+            return await store.create_wiki(slug, name, description=description)
+        except ValueError as e:
+            return {"error": str(e), "wikis": await store.list_wikis()}
 
-    async def _search(query: str) -> dict[str, Any]:
-        return {"results": await store.search(query)}
-
-    async def _write(
-        slug: str, title: str, body: str, summary: str = "", note: str = ""
+    async def _update_wiki(
+        wiki: str, name: str | None = None, description: str | None = None
     ) -> dict[str, Any]:
         try:
-            return await store.upsert_page(slug, title, body, summary=summary, note=note)
+            return await store.update_wiki(wiki, name=name, description=description)
+        except WikiNotFound:
+            return await _no_such_wiki(wiki)
+
+    async def _toc(wiki: str = DEFAULT_WIKI) -> dict[str, Any]:
+        try:
+            return {"wiki": wiki, "pages": await store.toc(wiki=wiki)}
+        except WikiNotFound:
+            return await _no_such_wiki(wiki)
+
+    async def _read(slug: str, wiki: str = DEFAULT_WIKI) -> dict[str, Any]:
+        try:
+            return await store.get_page(slug, wiki=wiki)
+        except WikiNotFound:
+            return await _no_such_wiki(wiki)
+        except PageNotFound:
+            return {
+                "error": f"no page '{slug}' in wiki '{wiki}'",
+                "pages": await store.toc(wiki=wiki),
+            }
+
+    async def _search(query: str, wiki: str = DEFAULT_WIKI) -> dict[str, Any]:
+        try:
+            return {"wiki": wiki, "results": await store.search(query, wiki=wiki)}
+        except WikiNotFound:
+            return await _no_such_wiki(wiki)
+
+    async def _write(
+        slug: str,
+        title: str,
+        body: str,
+        summary: str = "",
+        note: str = "",
+        wiki: str = DEFAULT_WIKI,
+    ) -> dict[str, Any]:
+        try:
+            return await store.upsert_page(
+                slug, title, body, summary=summary, note=note, wiki=wiki
+            )
+        except WikiNotFound:
+            return await _no_such_wiki(wiki)
         except ValueError as e:
             return {"error": str(e)}
 
-    async def _patch(slug: str, find: str, replace: str, note: str = "") -> dict[str, Any]:
+    async def _patch(
+        slug: str, find: str, replace: str, note: str = "", wiki: str = DEFAULT_WIKI
+    ) -> dict[str, Any]:
         try:
-            return await store.patch_page(slug, find, replace, note=note)
+            return await store.patch_page(slug, find, replace, note=note, wiki=wiki)
+        except WikiNotFound:
+            return await _no_such_wiki(wiki)
         except PageNotFound:
-            return {"error": f"no wiki page '{slug}'"}
+            return {"error": f"no page '{slug}' in wiki '{wiki}'"}
         except ValueError as e:
             return {"error": str(e)}
 
-    async def _cite(slug: str, url: str, note: str = "") -> dict[str, Any]:
+    async def _cite(slug: str, url: str, note: str = "", wiki: str = DEFAULT_WIKI) -> dict[str, Any]:
         try:
-            return await store.add_citation(slug, url, note=note)
+            return await store.add_citation(slug, url, note=note, wiki=wiki)
+        except WikiNotFound:
+            return await _no_such_wiki(wiki)
         except PageNotFound:
-            return {"error": f"no wiki page '{slug}'"}
+            return {"error": f"no page '{slug}' in wiki '{wiki}'"}
 
-    async def _ask(question: str, slug: str | None = None) -> dict[str, Any]:
-        return await store.add_question(question, slug=slug)
+    async def _ask(
+        question: str, slug: str | None = None, wiki: str = DEFAULT_WIKI
+    ) -> dict[str, Any]:
+        try:
+            return await store.add_question(question, slug=slug, wiki=wiki)
+        except WikiNotFound:
+            return await _no_such_wiki(wiki)
 
     async def _resolve(question_id: str) -> dict[str, Any]:
         try:
@@ -54,18 +114,75 @@ def register_tools(ctx: PluginContext, store: WikiStore) -> None:
         except PageNotFound:
             return {"error": f"no open question '{question_id}'"}
 
-    async def _questions(status: str = "open") -> dict[str, Any]:
-        return {"questions": await store.list_questions(status=status)}
+    async def _questions(status: str = "open", wiki: str = DEFAULT_WIKI) -> dict[str, Any]:
+        try:
+            return {"wiki": wiki, "questions": await store.list_questions(status=status, wiki=wiki)}
+        except WikiNotFound:
+            return await _no_such_wiki(wiki)
 
     defs: list[tuple[ToolDef, Any]] = [
         (
             ToolDef(
-                name="wiki_toc",
+                name="wiki_list_wikis",
                 description=(
-                    "Table of contents of your wiki: every page's slug, title, and "
-                    "summary. The map — start here before reading or writing."
+                    "List all wikis: slug, name, description, page count. Wikis are "
+                    "isolated knowledge spaces (a mission, a client, a domain each "
+                    "get their own). Start here when unsure where knowledge lives; "
+                    "pass a wiki's slug as `wiki` to every other wiki_* tool."
                 ),
                 parameters={"type": "object", "properties": {}},
+            ),
+            _list_wikis,
+        ),
+        (
+            ToolDef(
+                name="wiki_create_wiki",
+                description=(
+                    "Create a new isolated wiki (e.g. for a new mission, client, or "
+                    "domain). Pages, links, search, and questions never cross wiki "
+                    "boundaries. Give it a clear name and a 1-2 sentence description "
+                    "of what belongs inside."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "slug": {"type": "string", "description": "kebab-case wiki id, e.g. 'client-acme'"},
+                        "name": {"type": "string"},
+                        "description": {"type": "string", "description": "What this wiki covers (shown as its shelf label)."},
+                    },
+                    "required": ["slug", "name"],
+                },
+            ),
+            _create_wiki,
+        ),
+        (
+            ToolDef(
+                name="wiki_update_wiki",
+                description=(
+                    "Rename a wiki or refresh its description. Keep descriptions "
+                    "current — they are the shelf labels used to route future "
+                    "knowledge to the right wiki."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "wiki": {"type": "string", "description": "Wiki slug to update."},
+                        "name": {"type": "string"},
+                        "description": {"type": "string"},
+                    },
+                    "required": ["wiki"],
+                },
+            ),
+            _update_wiki,
+        ),
+        (
+            ToolDef(
+                name="wiki_toc",
+                description=(
+                    "Table of contents of one wiki: every page's slug, title, and "
+                    "summary. The map — start here before reading or writing."
+                ),
+                parameters={"type": "object", "properties": {"wiki": _WIKI_PARAM}},
             ),
             _toc,
         ),
@@ -75,7 +192,7 @@ def register_tools(ctx: PluginContext, store: WikiStore) -> None:
                 description="Read a wiki page's full markdown body plus citations and outgoing links.",
                 parameters={
                     "type": "object",
-                    "properties": {"slug": {"type": "string"}},
+                    "properties": {"slug": {"type": "string"}, "wiki": _WIKI_PARAM},
                     "required": ["slug"],
                 },
             ),
@@ -84,10 +201,14 @@ def register_tools(ctx: PluginContext, store: WikiStore) -> None:
         (
             ToolDef(
                 name="wiki_search",
-                description="Search wiki pages; returns relevance-ranked slugs + summaries (use wiki_read for full bodies).",
+                description=(
+                    "Search one wiki's pages; returns relevance-ranked slugs + "
+                    "summaries (use wiki_read for full bodies). Searches only the "
+                    "given wiki — check wiki_list_wikis if unsure where to look."
+                ),
                 parameters={
                     "type": "object",
-                    "properties": {"query": {"type": "string"}},
+                    "properties": {"query": {"type": "string"}, "wiki": _WIKI_PARAM},
                     "required": ["query"],
                 },
             ),
@@ -99,9 +220,9 @@ def register_tools(ctx: PluginContext, store: WikiStore) -> None:
                 description=(
                     "Create or fully replace a wiki page (markdown body). Link related "
                     "pages inline with [[slug]] wikilinks — they materialize the "
-                    "knowledge graph automatically. Always provide a 1-2 sentence "
-                    "`summary`; it is what gets injected into future context. Each "
-                    "write records a revision."
+                    "knowledge graph automatically (links resolve inside the same "
+                    "wiki only). Always provide a 1-2 sentence `summary`; it is what "
+                    "gets injected into future context. Each write records a revision."
                 ),
                 parameters={
                     "type": "object",
@@ -111,6 +232,7 @@ def register_tools(ctx: PluginContext, store: WikiStore) -> None:
                         "body": {"type": "string", "description": "Full markdown body with [[slug]] wikilinks."},
                         "summary": {"type": "string", "description": "1-2 sentence page summary (injected into context)."},
                         "note": {"type": "string", "description": "Short revision note (why this edit)."},
+                        "wiki": _WIKI_PARAM,
                     },
                     "required": ["slug", "title", "body"],
                 },
@@ -132,6 +254,7 @@ def register_tools(ctx: PluginContext, store: WikiStore) -> None:
                         "find": {"type": "string"},
                         "replace": {"type": "string"},
                         "note": {"type": "string"},
+                        "wiki": _WIKI_PARAM,
                     },
                     "required": ["slug", "find", "replace"],
                 },
@@ -148,6 +271,7 @@ def register_tools(ctx: PluginContext, store: WikiStore) -> None:
                         "slug": {"type": "string"},
                         "url": {"type": "string"},
                         "note": {"type": "string"},
+                        "wiki": _WIKI_PARAM,
                     },
                     "required": ["slug", "url"],
                 },
@@ -163,6 +287,7 @@ def register_tools(ctx: PluginContext, store: WikiStore) -> None:
                     "properties": {
                         "question": {"type": "string"},
                         "slug": {"type": "string", "description": "Related page slug (optional)."},
+                        "wiki": _WIKI_PARAM,
                     },
                     "required": ["question"],
                 },
@@ -184,11 +309,12 @@ def register_tools(ctx: PluginContext, store: WikiStore) -> None:
         (
             ToolDef(
                 name="wiki_list_questions",
-                description="List open (or resolved) wiki questions.",
+                description="List open (or resolved) questions in one wiki.",
                 parameters={
                     "type": "object",
                     "properties": {
-                        "status": {"type": "string", "enum": ["open", "resolved"], "default": "open"}
+                        "status": {"type": "string", "enum": ["open", "resolved"], "default": "open"},
+                        "wiki": _WIKI_PARAM,
                     },
                 },
             ),

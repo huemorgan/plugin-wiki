@@ -10,7 +10,16 @@ const _uiIdx = _path.lastIndexOf('/ui/')
 export const PLUGIN_BASE = _uiIdx >= 0 ? _path.slice(0, _uiIdx) : '/api/p/plugin-wiki'
 export const CORE_BASE = PLUGIN_BASE.replace(/\/api\/p\/plugin-wiki$/, '')
 
+export interface WikiMeta {
+  slug: string
+  name: string
+  description: string
+  page_count: number
+  updated_at: string | null
+}
+
 export interface PageMeta {
+  wiki?: string
   slug: string
   title: string
   summary: string
@@ -57,23 +66,35 @@ export interface Graph {
   edges: GraphEdge[]
 }
 
-async function get<T>(path: string, retried = false): Promise<T> {
+async function request<T>(method: string, path: string, body?: unknown, retried = false): Promise<T> {
   const token = await getTokenAsync()
   const res = await fetch(`${PLUGIN_BASE}${path}`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    method,
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
+    },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
   })
   if (res.status === 401 && !retried) {
     invalidateToken()
-    return get<T>(path, true)
+    return request<T>(method, path, body, true)
   }
-  if (!res.ok) throw new Error(`GET ${path} -> ${res.status}`)
+  if (!res.ok) throw new Error(`${method} ${path} -> ${res.status}`)
   return (await res.json()) as T
 }
 
-export const fetchGraph = () => get<Graph>('/graph')
-export const fetchPage = (slug: string) => get<Page>(`/pages/${encodeURIComponent(slug)}`)
-export const fetchRevisions = (slug: string) =>
-  get<Revision[]>(`/pages/${encodeURIComponent(slug)}/revisions`)
-export const fetchQuestions = () => get<Question[]>('/questions?status=open')
-export const searchPages = (q: string) =>
-  get<(PageMeta & { score: number })[]>(`/search?q=${encodeURIComponent(q)}`)
+const get = <T,>(path: string) => request<T>('GET', path)
+const w = (wiki: string) => `wiki=${encodeURIComponent(wiki)}`
+
+export const fetchWikis = () => get<WikiMeta[]>('/wikis')
+export const createWiki = (slug: string, name: string, description: string) =>
+  request<WikiMeta>('POST', '/wikis', { slug, name, description })
+export const fetchGraph = (wiki: string) => get<Graph>(`/graph?${w(wiki)}`)
+export const fetchPage = (wiki: string, slug: string) =>
+  get<Page>(`/pages/${encodeURIComponent(slug)}?${w(wiki)}`)
+export const fetchRevisions = (wiki: string, slug: string) =>
+  get<Revision[]>(`/pages/${encodeURIComponent(slug)}/revisions?${w(wiki)}`)
+export const fetchQuestions = (wiki: string) => get<Question[]>(`/questions?status=open&${w(wiki)}`)
+export const searchPages = (wiki: string, q: string) =>
+  get<(PageMeta & { score: number })[]>(`/search?q=${encodeURIComponent(q)}&${w(wiki)}`)

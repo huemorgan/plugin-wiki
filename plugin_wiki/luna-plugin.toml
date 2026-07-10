@@ -3,33 +3,52 @@
 
 name = "plugin-wiki"
 shown_name = "Wiki"
-version = "0.3.2"
-description = "Mission knowledge base: wiki pages, revisions, citations, open questions."
+version = "0.4.0"
+description = "Mission knowledge base: isolated wikis of pages, revisions, citations, open questions."
 entry = "plugin_wiki"
 sdk_version = "0"
 license = "MIT"
 category = "global"
 tags = ["knowledge", "wiki", "memory"]
 provider = "wiki"
-db_tables = ["wiki_pages", "wiki_revisions", "wiki_citations", "wiki_open_questions", "wiki_links"]
+db_tables = ["wikis", "wiki_pages", "wiki_revisions", "wiki_citations", "wiki_open_questions", "wiki_links"]
 readme = """
 # plugin-wiki
 
 Luna's mission knowledge base — a Karpathy-style LLM wiki. Authored, revisable
-markdown pages with [[wikilinks]], citations, and open questions. Knowledge
-accumulates by compile-time synthesis (authored pages), not query-time RAG.
+markdown pages with [[wikilinks]], citations, and open questions, organized
+into isolated wikis (one per mission, client, or domain). Each wiki carries a
+name and a description that the nightly dream keeps current.
 
 Substrate only: other plugins (e.g. plugin-curiosity) drive who writes and when,
 via the `wiki` provider.
 """
 
 [requires]
-tools = 9
-tables = 5
+tools = 12
+tables = 6
+
+[[tools]]
+name = "wiki_list_wikis"
+description = "List all wikis: slug, name, description, page count."
+policy = "auto_approve"
+risk_level = "low"
+
+[[tools]]
+name = "wiki_create_wiki"
+description = "Create a new isolated wiki (mission, client, domain)."
+policy = "auto_approve"
+risk_level = "low"
+
+[[tools]]
+name = "wiki_update_wiki"
+description = "Rename a wiki or refresh its description."
+policy = "auto_approve"
+risk_level = "low"
 
 [[tools]]
 name = "wiki_toc"
-description = "Table of contents: every page's slug, title, summary."
+description = "Table of contents of one wiki: every page's slug, title, summary."
 policy = "auto_approve"
 risk_level = "low"
 
@@ -41,7 +60,7 @@ risk_level = "low"
 
 [[tools]]
 name = "wiki_search"
-description = "Relevance-ranked page summaries for a query."
+description = "Relevance-ranked page summaries for a query, within one wiki."
 policy = "auto_approve"
 risk_level = "low"
 

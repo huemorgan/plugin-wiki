@@ -18,11 +18,13 @@ function preprocessWikilinks(body: string): string {
 }
 
 export function PageView({
+  wiki,
   slug,
   refreshKey,
   onBack,
   onNavigate,
 }: {
+  wiki: string
   slug: string
   refreshKey: number
   onBack: () => void
@@ -36,7 +38,7 @@ export function PageView({
   useEffect(() => {
     let alive = true
     setError(null)
-    Promise.all([fetchPage(slug), fetchRevisions(slug), fetchQuestions()])
+    Promise.all([fetchPage(wiki, slug), fetchRevisions(wiki, slug), fetchQuestions(wiki)])
       .then(([p, revs, qs]) => {
         if (!alive) return
         setPage(p)
@@ -47,7 +49,7 @@ export function PageView({
     return () => {
       alive = false
     }
-  }, [slug, refreshKey])
+  }, [wiki, slug, refreshKey])
 
   if (error)
     return (

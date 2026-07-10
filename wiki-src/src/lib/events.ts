@@ -2,7 +2,8 @@ import { CORE_BASE } from './api'
 
 export interface WikiUpdate {
   action: string
-  slug: string
+  slug: string | null
+  wiki?: string | null
 }
 
 /**

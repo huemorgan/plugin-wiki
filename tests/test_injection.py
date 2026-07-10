@@ -50,3 +50,59 @@ def test_tier2_overflow_is_reported_not_silent():
 
 def test_tier2_empty_wiki_is_empty():
     assert tier2_toc([]) == ""
+    assert tier2_toc([{"slug": "main", "name": "Main", "description": "", "pages": []}]) == ""
+
+
+# ── multi-wiki grouping (0.4.0) ───────────────────────────────────────
+
+
+def _wikis() -> list[dict]:
+    return [
+        {
+            "slug": "main",
+            "name": "Main",
+            "description": "General mission knowledge.",
+            "pages": _pages(3),
+        },
+        {
+            "slug": "client-acme",
+            "name": "Client: Acme",
+            "description": "Everything about the Acme engagement.",
+            "pages": [
+                {
+                    "slug": "kickoff",
+                    "title": "Kickoff",
+                    "summary": "Notes from the kickoff call.",
+                    "updated_at": "2026-07-30T00:00:00",
+                }
+            ],
+        },
+    ]
+
+
+def test_tier1_mentions_wiki_count_when_multi():
+    note = tier1_note(12, 3, wiki_count=4)
+    assert "4 isolated wikis" in note
+    assert "wiki_list_wikis" in note and "wiki_create_wiki" in note
+
+
+def test_tier2_groups_by_wiki_with_descriptions():
+    out = tier2_toc(_wikis())
+    assert "### Client: Acme (wiki: client-acme) — Everything about the Acme engagement." in out
+    assert "### Main (wiki: main)" in out
+    # busiest-first: client-acme has the most recent page → listed first
+    assert out.index("client-acme") < out.index("### Main")
+    assert "[[kickoff]]" in out
+
+
+def test_tier2_single_wiki_has_no_headers():
+    out = tier2_toc([{"slug": "main", "name": "Main", "description": "", "pages": _pages(3)}])
+    assert "###" not in out
+    assert "[[topic-1]]" in out
+
+
+def test_tier2_flat_page_list_still_works():
+    # pre-0.4.0 call shape: a flat list of page metas
+    out = tier2_toc(_pages(3))
+    assert "[[topic-1]]" in out
+    assert "###" not in out

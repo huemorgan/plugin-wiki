@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import {
   ReactFlow,
   Background,
@@ -74,6 +74,11 @@ function layout(graph: Graph, updatedSlug: string | null): { nodes: Node[]; edge
   return { nodes, edges }
 }
 
+/** Screen-space hover card: lives OUTSIDE the zoomed viewport transform, so
+ * its text always renders at 100% font size no matter how far the graph is
+ * zoomed out. One element for the whole graph, one state update per hover. */
+type Hover = { node: GraphNode; x: number; y: number; below: boolean }
+
 export function GraphView({
   graph,
   updatedSlug,
@@ -84,8 +89,28 @@ export function GraphView({
   onOpenPage: (slug: string) => void
 }) {
   const { nodes, edges } = useMemo(() => layout(graph, updatedSlug), [graph, updatedSlug])
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  const [hover, setHover] = useState<Hover | null>(null)
+
+  const clearHover = useCallback(() => setHover(null), [])
+
+  const onEnter = useCallback((event: React.MouseEvent, n: Node) => {
+    const container = containerRef.current
+    const el = (event.target as HTMLElement).closest('.react-flow__node')
+    if (!container || !el) return
+    const c = container.getBoundingClientRect()
+    const r = el.getBoundingClientRect()
+    const below = r.top - c.top < 120 // no room above → flip under the node
+    setHover({
+      node: (n.data as WikiNodeData).node,
+      x: Math.min(Math.max(r.left - c.left + r.width / 2, 8), c.width - 8),
+      y: below ? r.bottom - c.top + 8 : r.top - c.top - 8,
+      below,
+    })
+  }, [])
+
   return (
-    <div className="h-full w-full" data-testid="wiki-graph">
+    <div className="h-full w-full relative" data-testid="wiki-graph" ref={containerRef}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -94,7 +119,12 @@ export function GraphView({
         proOptions={{ hideAttribution: true }}
         nodesDraggable
         nodesConnectable={false}
+        onNodeMouseEnter={onEnter}
+        onNodeMouseLeave={clearHover}
+        onNodeDragStart={clearHover}
+        onMove={clearHover}
         onNodeClick={(_, n) => {
+          clearHover()
           const wn = (n.data as WikiNodeData).node
           if (wn.kind === 'page') onOpenPage(wn.id)
           else if (wn.kind === 'source') window.open(wn.id, '_blank', 'noopener')
@@ -104,6 +134,29 @@ export function GraphView({
         <Background color="#1c1c28" gap={24} />
         <Controls showInteractive={false} />
       </ReactFlow>
+      {hover && (
+        <div
+          data-testid="wiki-hover-card"
+          className="absolute z-50 pointer-events-none max-w-72 rounded-lg border border-ink-600 bg-ink-900 px-3 py-2 shadow-xl"
+          style={{
+            left: hover.x,
+            top: hover.y,
+            transform: `translate(-50%, ${hover.below ? '0' : '-100%'})`,
+          }}
+        >
+          <div className="text-sm font-medium text-ink-100">{hover.node.label}</div>
+          {hover.node.summary && (
+            <div className="text-xs text-ink-400 mt-1 leading-relaxed line-clamp-4">
+              {hover.node.summary}
+            </div>
+          )}
+          {hover.node.kind !== 'page' && (
+            <div className="text-[10px] text-ink-500 mt-1 uppercase tracking-wide">
+              {hover.node.kind === 'stub' ? 'not written yet' : 'external source'}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

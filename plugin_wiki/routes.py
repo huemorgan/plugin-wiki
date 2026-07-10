@@ -12,8 +12,10 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
-from .store import PageNotFound, WikiStore
+from .models import DEFAULT_WIKI
+from .store import PageNotFound, WikiNotFound, WikiStore
 
 _UI_DIR = Path(__file__).parent / "ui"
 _NO_CACHE = {"Cache-Control": "no-store"}
@@ -60,34 +62,71 @@ load();
 </script></body></html>"""
 
 
+# Module level, NOT inside register_routes: with `from __future__ import
+# annotations` FastAPI resolves the `body: WikiCreate` string annotation from
+# module globals — a function-local class silently degrades to a query param.
+class WikiCreate(BaseModel):
+    slug: str
+    name: str
+    description: str = ""
+
+
 def register_routes(app, ctx):
     from luna_sdk import get_current_user
 
     store = WikiStore(ctx.db_session_factory)
     router = APIRouter(prefix="/api/p/plugin-wiki", tags=["wiki"])
 
+    @router.get("/wikis")
+    async def list_wikis(user=Depends(get_current_user)):
+        return await store.list_wikis()
+
+    @router.post("/wikis")
+    async def create_wiki(body: WikiCreate, user=Depends(get_current_user)):
+        try:
+            return await store.create_wiki(body.slug, body.name, description=body.description)
+        except ValueError as e:
+            raise HTTPException(409, str(e)) from e
+
     @router.get("/pages")
-    async def list_pages(user=Depends(get_current_user)):
-        return await store.toc()
+    async def list_pages(wiki: str = DEFAULT_WIKI, user=Depends(get_current_user)):
+        try:
+            return await store.toc(wiki=wiki)
+        except WikiNotFound as e:
+            raise HTTPException(404, "wiki not found") from e
 
     @router.get("/links")
-    async def list_links(user=Depends(get_current_user)):
-        return await store.links()
+    async def list_links(wiki: str = DEFAULT_WIKI, user=Depends(get_current_user)):
+        try:
+            return await store.links(wiki=wiki)
+        except WikiNotFound as e:
+            raise HTTPException(404, "wiki not found") from e
 
     @router.get("/questions")
-    async def list_questions(status: str = "open", user=Depends(get_current_user)):
-        return await store.list_questions(status=status)
+    async def list_questions(
+        status: str = "open", wiki: str = DEFAULT_WIKI, user=Depends(get_current_user)
+    ):
+        try:
+            return await store.list_questions(status=status, wiki=wiki)
+        except WikiNotFound as e:
+            raise HTTPException(404, "wiki not found") from e
 
     @router.get("/search")
-    async def search(q: str, user=Depends(get_current_user)):
-        return await store.search(q)
+    async def search(q: str, wiki: str = DEFAULT_WIKI, user=Depends(get_current_user)):
+        try:
+            return await store.search(q, wiki=wiki)
+        except WikiNotFound as e:
+            raise HTTPException(404, "wiki not found") from e
 
     @router.get("/graph")
-    async def graph(user=Depends(get_current_user)):
-        """React Flow-shaped graph: page nodes + wikilink/citation edges.
-        Wikilink targets without a page yet render as stub nodes."""
-        pages = await store.toc()
-        links = await store.links()
+    async def graph(wiki: str = DEFAULT_WIKI, user=Depends(get_current_user)):
+        """React Flow-shaped graph for one wiki: page nodes + wikilink/citation
+        edges. Wikilink targets without a page yet render as stub nodes."""
+        try:
+            pages = await store.toc(wiki=wiki)
+            links = await store.links(wiki=wiki)
+        except WikiNotFound as e:
+            raise HTTPException(404, "wiki not found") from e
         nodes = [
             {"id": p["slug"], "label": p["title"] or p["slug"], "kind": "page",
              "summary": p["summary"], "updated_at": p["updated_at"]}
@@ -112,16 +151,20 @@ def register_routes(app, ctx):
 
     # declared BEFORE the greedy /pages/{slug:path} route
     @router.get("/pages/{slug:path}/revisions")
-    async def page_revisions(slug: str, user=Depends(get_current_user)):
+    async def page_revisions(slug: str, wiki: str = DEFAULT_WIKI, user=Depends(get_current_user)):
         try:
-            return await store.revisions(slug)
+            return await store.revisions(slug, wiki=wiki)
+        except WikiNotFound as e:
+            raise HTTPException(404, "wiki not found") from e
         except PageNotFound as e:
             raise HTTPException(404, "page not found") from e
 
     @router.get("/pages/{slug:path}")
-    async def get_page(slug: str, user=Depends(get_current_user)):
+    async def get_page(slug: str, wiki: str = DEFAULT_WIKI, user=Depends(get_current_user)):
         try:
-            return await store.get_page(slug)
+            return await store.get_page(slug, wiki=wiki)
+        except WikiNotFound as e:
+            raise HTTPException(404, "wiki not found") from e
         except PageNotFound as e:
             raise HTTPException(404, "page not found") from e
 
