@@ -4,7 +4,8 @@ plugin-owned tables, so all tools use the default auto_approve policy.
 0.4.0: every tool takes an optional `wiki` (slug, default `main`); three new
 tools let the agent create and navigate isolated wikis.
 0.6.0: lifecycle tools — wiki_archive_page / wiki_unarchive_page (reversible,
-hidden from toc/search/injection) and wiki_delete_page (hard delete)."""
+hidden from toc/search/injection) and wiki_delete_page (hard delete).
+0.7.0: `reason` accepted as an alias for `note` on wiki_write / wiki_patch."""
 
 from __future__ import annotations
 
@@ -71,11 +72,12 @@ def register_tools(ctx: PluginContext, store: WikiStore) -> None:
         body: str,
         summary: str = "",
         note: str = "",
+        reason: str = "",
         wiki: str = DEFAULT_WIKI,
     ) -> dict[str, Any]:
         try:
             return await store.upsert_page(
-                slug, title, body, summary=summary, note=note, wiki=wiki
+                slug, title, body, summary=summary, note=note or reason, wiki=wiki
             )
         except WikiNotFound:
             return await _no_such_wiki(wiki)
@@ -83,10 +85,15 @@ def register_tools(ctx: PluginContext, store: WikiStore) -> None:
             return {"error": str(e)}
 
     async def _patch(
-        slug: str, find: str, replace: str, note: str = "", wiki: str = DEFAULT_WIKI
+        slug: str,
+        find: str,
+        replace: str,
+        note: str = "",
+        reason: str = "",
+        wiki: str = DEFAULT_WIKI,
     ) -> dict[str, Any]:
         try:
-            return await store.patch_page(slug, find, replace, note=note, wiki=wiki)
+            return await store.patch_page(slug, find, replace, note=note or reason, wiki=wiki)
         except WikiNotFound:
             return await _no_such_wiki(wiki)
         except PageNotFound:
@@ -269,6 +276,7 @@ def register_tools(ctx: PluginContext, store: WikiStore) -> None:
                         "body": {"type": "string", "description": "Full markdown body with [[slug]] wikilinks."},
                         "summary": {"type": "string", "description": "1-2 sentence page summary (injected into context)."},
                         "note": {"type": "string", "description": "Short revision note (why this edit)."},
+                        "reason": {"type": "string", "description": "Alias for `note`."},
                         "wiki": _WIKI_PARAM,
                     },
                     "required": ["slug", "title", "body"],
@@ -290,7 +298,8 @@ def register_tools(ctx: PluginContext, store: WikiStore) -> None:
                         "slug": {"type": "string"},
                         "find": {"type": "string"},
                         "replace": {"type": "string"},
-                        "note": {"type": "string"},
+                        "note": {"type": "string", "description": "Short revision note (why this edit)."},
+                        "reason": {"type": "string", "description": "Alias for `note`."},
                         "wiki": _WIKI_PARAM,
                     },
                     "required": ["slug", "find", "replace"],

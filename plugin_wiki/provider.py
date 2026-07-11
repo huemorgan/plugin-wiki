@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from . import extract
 from .models import DEFAULT_WIKI
 from .store import PageNotFound, WikiNotFound, WikiStore
 
@@ -85,3 +86,36 @@ class WikiProvider:
     async def page_count(self, wiki: str | None = None) -> int:
         """Across all wikis by default (pre-0.4.0 behavior: one global wiki)."""
         return await self._store.count_pages(wiki=wiki)
+
+    # ── extraction (0.7.0) — structured reads without shipping the body ─
+
+    async def get_section(
+        self, slug: str, header: str, wiki: str = DEFAULT_WIKI
+    ) -> dict[str, Any] | None:
+        """The section under `header` (first match wins): raw text + parsed
+        bullet/numbered items. None when page or header is missing."""
+        page = await self.get_page(slug, wiki=wiki)
+        if page is None:
+            return None
+        return extract.get_section(page.get("body") or "", header)
+
+    async def get_table(
+        self, slug: str, header: str = "", wiki: str = DEFAULT_WIKI
+    ) -> dict[str, Any] | None:
+        """First pipe table under `header` (whole page when header empty):
+        columns + rows. None when page, header, or table is missing."""
+        page = await self.get_page(slug, wiki=wiki)
+        if page is None:
+            return None
+        return extract.get_table(page.get("body") or "", header)
+
+    # ── revisions (0.7.0) ──────────────────────────────────────────────
+
+    async def revisions(self, slug: str, wiki: str = DEFAULT_WIKI) -> list[dict[str, Any]]:
+        """Revision history newest-first: {note, created_at, chars} per write.
+        Empty when the page (or wiki) doesn't exist."""
+        try:
+            revs = await self._store.revisions(slug, wiki=wiki)
+        except (PageNotFound, WikiNotFound):
+            return []
+        return list(reversed(revs))
