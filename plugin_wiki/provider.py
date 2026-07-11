@@ -52,8 +52,22 @@ class WikiProvider:
             slug, title, body, summary=summary, note=note, mission_id=mission_id, wiki=wiki
         )
 
-    async def toc(self, wiki: str = DEFAULT_WIKI) -> list[dict[str, Any]]:
-        return await self._store.toc(wiki=wiki)
+    async def toc(self, wiki: str = DEFAULT_WIKI, archived: bool = False) -> list[dict[str, Any]]:
+        return await self._store.toc(wiki=wiki, archived=archived)
+
+    async def set_archived(
+        self, slug: str, archived: bool, wiki: str = DEFAULT_WIKI
+    ) -> dict[str, Any] | None:
+        try:
+            return await self._store.set_archived(slug, archived, wiki=wiki)
+        except (PageNotFound, WikiNotFound):
+            return None
+
+    async def delete_page(self, slug: str, wiki: str = DEFAULT_WIKI) -> dict[str, Any] | None:
+        try:
+            return await self._store.delete_page(slug, wiki=wiki)
+        except (PageNotFound, WikiNotFound):
+            return None
 
     async def search(
         self, query: str, limit: int = 8, wiki: str = DEFAULT_WIKI

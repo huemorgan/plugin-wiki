@@ -239,3 +239,88 @@ async def test_overview_groups_pages_by_wiki(store):
     assert [p["slug"] for p in ov["main"]["pages"]] == ["a"]
     assert [p["slug"] for p in ov["other"]["pages"]] == ["b"]
     assert ov["other"]["description"] == "side quests"
+
+
+# ── archive / delete (0.6.0) ──────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_archive_hides_from_toc_search_and_counts(store):
+    await store.upsert_page("keep", "Keep", "pricing stuff")
+    await store.upsert_page("old", "Old", "pricing stuff too", summary="stale")
+    await store.set_archived("old", True)
+
+    assert [p["slug"] for p in await store.toc()] == ["keep"]
+    assert [p["slug"] for p in await store.toc(archived=True)] == ["old"]
+    assert [r["slug"] for r in await store.search("pricing")] == ["keep"]
+    assert await store.count_pages() == 1
+    assert (await store.list_wikis())[0]["page_count"] == 1
+    # still readable, flagged, history intact
+    page = await store.get_page("old")
+    assert page["archived"] is True
+    assert page["revision_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_unarchive_and_write_both_revive(store):
+    await store.upsert_page("a", "A", "body")
+    await store.set_archived("a", True)
+    await store.set_archived("a", False)
+    assert [p["slug"] for p in await store.toc()] == ["a"]
+
+    await store.set_archived("a", True)
+    await store.upsert_page("a", "A", "new body")  # body write revives
+    assert [p["slug"] for p in await store.toc()] == ["a"]
+    assert await store.toc(archived=True) == []
+
+
+@pytest.mark.asyncio
+async def test_delete_page_removes_history_and_own_edges(store):
+    await store.upsert_page("junk", "Junk", "see [[keeper]]")
+    await store.upsert_page("keeper", "Keeper", "links to [[junk]]")
+    await store.add_citation("junk", "https://example.com")
+    q = await store.add_question("about junk?", slug="junk")
+
+    result = await store.delete_page("junk")
+    assert result["deleted"] == "junk"
+    with pytest.raises(PageNotFound):
+        await store.get_page("junk")
+    # outgoing edges gone, incoming edge from keeper survives (stub target)
+    assert {(l["from"], l["to"]) for l in await store.links() if l["kind"] == "wikilink"} == {
+        ("keeper", "junk")
+    }
+    # question survives, detached from the page
+    open_qs = await store.list_questions()
+    assert [x["id"] for x in open_qs] == [q["id"]]
+    assert open_qs[0]["page"] is None
+
+
+@pytest.mark.asyncio
+async def test_archive_delete_missing_page_raises(store):
+    with pytest.raises(PageNotFound):
+        await store.set_archived("nope", True)
+    with pytest.raises(PageNotFound):
+        await store.delete_page("nope")
+
+
+@pytest.mark.asyncio
+async def test_archive_and_delete_fire_change_events(store):
+    seen = []
+
+    async def on_change(evt):
+        seen.append(evt)
+
+    await store.upsert_page("a", "A", "body")
+    store.on_change = on_change
+    await store.set_archived("a", True)
+    await store.set_archived("a", False)
+    await store.delete_page("a")
+    assert [e["action"] for e in seen] == ["archive", "unarchive", "delete"]
+
+
+@pytest.mark.asyncio
+async def test_delete_pages_then_wiki(store):
+    await store.create_wiki("temp2", "Temp2")
+    await store.upsert_page("a", "A", "body", wiki="temp2")
+    await store.delete_page("a", wiki="temp2")
+    assert (await store.delete_wiki("temp2"))["deleted"] == "temp2"

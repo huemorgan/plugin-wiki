@@ -24,6 +24,7 @@ export interface PageMeta {
   title: string
   summary: string
   updated_at: string | null
+  archived?: boolean
 }
 
 export interface Page extends PageMeta {
@@ -91,6 +92,7 @@ export const fetchWikis = () => get<WikiMeta[]>('/wikis')
 export const createWiki = (slug: string, name: string, description: string) =>
   request<WikiMeta>('POST', '/wikis', { slug, name, description })
 export const fetchGraph = (wiki: string) => get<Graph>(`/graph?${w(wiki)}`)
+export const fetchArchived = (wiki: string) => get<PageMeta[]>(`/pages?archived=true&${w(wiki)}`)
 export const fetchPage = (wiki: string, slug: string) =>
   get<Page>(`/pages/${encodeURIComponent(slug)}?${w(wiki)}`)
 export const fetchRevisions = (wiki: string, slug: string) =>

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Clock, ExternalLink, HelpCircle, X } from 'lucide-react'
+import { Archive, Clock, ExternalLink, HelpCircle, X } from 'lucide-react'
 import {
   fetchPage,
   fetchRevisions,
@@ -74,6 +74,14 @@ export function PageView({
           {page.title || page.slug}
         </h1>
         <div className="flex items-center gap-3 text-[11px] text-ink-500 mt-1 mb-4">
+          {page.archived && (
+            <span
+              className="flex items-center gap-1 px-2 py-0.5 rounded-full border border-ink-700 text-ink-400"
+              data-testid="wiki-archived-chip"
+            >
+              <Archive size={10} /> Archived
+            </span>
+          )}
           <span className="font-mono">{page.slug}</span>
           {page.updated_at && (
             <span className="flex items-center gap-1">

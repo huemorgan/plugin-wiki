@@ -3,7 +3,7 @@
 
 name = "plugin-wiki"
 shown_name = "Wiki"
-version = "0.5.0"
+version = "0.6.0"
 description = "Mission knowledge base: isolated wikis of pages, revisions, citations, open questions."
 entry = "plugin_wiki"
 sdk_version = "0"
@@ -25,7 +25,7 @@ via the `wiki` provider.
 """
 
 [requires]
-tools = 12
+tools = 15
 tables = 6
 
 [[tools]]
@@ -73,6 +73,24 @@ risk_level = "low"
 [[tools]]
 name = "wiki_patch"
 description = "Edit part of a page via find/replace (records a revision)."
+policy = "auto_approve"
+risk_level = "low"
+
+[[tools]]
+name = "wiki_archive_page"
+description = "Archive a page: hidden from TOC/search/context, reversible."
+policy = "auto_approve"
+risk_level = "low"
+
+[[tools]]
+name = "wiki_unarchive_page"
+description = "Restore an archived page to the live wiki."
+policy = "auto_approve"
+risk_level = "low"
+
+[[tools]]
+name = "wiki_delete_page"
+description = "Permanently delete a page and its history (for junk/duplicates)."
 policy = "auto_approve"
 risk_level = "low"
 

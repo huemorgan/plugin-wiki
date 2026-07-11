@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import delete, func, select
+from sqlalchemy import update as update_q
 
 from .models import (
     DEFAULT_WIKI,
@@ -64,7 +65,7 @@ def _age_days(dt) -> float | None:
 
 
 def _page_meta(p: WikiPage, wiki: str) -> dict[str, Any]:
-    return {
+    out = {
         "wiki": wiki,
         "slug": p.slug,
         "title": p.title,
@@ -72,6 +73,9 @@ def _page_meta(p: WikiPage, wiki: str) -> dict[str, Any]:
         "updated_at": p.updated_at.isoformat() if p.updated_at else None,
         "age_days": _age_days(p.updated_at),
     }
+    if p.archived_at is not None:
+        out["archived"] = True
+    return out
 
 
 def _wiki_meta(w: Wiki, page_count: int | None = None) -> dict[str, Any]:
@@ -128,7 +132,10 @@ class WikiStore:
                 (
                     await s.execute(
                         select(Wiki, func.count(WikiPage.id))
-                        .outerjoin(WikiPage, WikiPage.wiki_id == Wiki.id)
+                        .outerjoin(
+                            WikiPage,
+                            (WikiPage.wiki_id == Wiki.id) & WikiPage.archived_at.is_(None),
+                        )
                         .group_by(Wiki.id)
                         .order_by(Wiki.created_at)
                     )
@@ -215,6 +222,7 @@ class WikiStore:
                 s.add(page)
             page.title = title or page.title or slug
             page.body = body
+            page.archived_at = None  # any body write revives an archived page
             if summary:
                 page.summary = summary
             if mission_id is not None:
@@ -248,6 +256,7 @@ class WikiStore:
                     f"`find` text occurs {count} times in '{slug}' — must occur exactly once"
                 )
             page.body = page.body.replace(find, replace)
+            page.archived_at = None  # any body write revives an archived page
             await s.flush()
             s.add(WikiRevision(page_id=page.id, body=page.body, note=note or "patch"))
             links = await self._reparse_links(s, w.id, slug, page.body)
@@ -255,6 +264,56 @@ class WikiStore:
             out = {**_page_meta(page, w.slug), "links": links}
         await self._changed("patch", slug, out["wiki"])
         return out
+
+    async def _page_row(self, s, w: Wiki, slug: str) -> WikiPage:
+        page = (
+            await s.execute(
+                select(WikiPage).where(WikiPage.wiki_id == w.id, WikiPage.slug == slug)
+            )
+        ).scalar_one_or_none()
+        if page is None:
+            raise PageNotFound(slug)
+        return page
+
+    async def set_archived(
+        self, slug: str, archived: bool, wiki: str = DEFAULT_WIKI
+    ) -> dict[str, Any]:
+        """Archive (hide from toc/search/injection, keep everything) or revive.
+        Reversible — the safe alternative to delete_page."""
+        slug = slugify(slug)
+        async with self._sf() as s:
+            w = await self._wiki_row(s, wiki)
+            page = await self._page_row(s, w, slug)
+            page.archived_at = datetime.now(UTC) if archived else None
+            await s.commit()
+            out = _page_meta(page, w.slug)
+        await self._changed("archive" if archived else "unarchive", slug, out["wiki"])
+        return out
+
+    async def delete_page(self, slug: str, wiki: str = DEFAULT_WIKI) -> dict[str, Any]:
+        """Hard delete: page, revisions, citations, and its outgoing link edges.
+        Deletes are explicit (not FK-cascade) so SQLite without foreign_keys=ON
+        behaves identically to Postgres. Incoming [[slug]] links from other
+        pages remain — the target becomes a stub, same as a never-written page."""
+        slug = slugify(slug)
+        async with self._sf() as s:
+            w = await self._wiki_row(s, wiki)
+            page = await self._page_row(s, w, slug)
+            await s.execute(
+                update_q(WikiOpenQuestion)
+                .where(WikiOpenQuestion.page_id == page.id)
+                .values(page_id=None)
+            )
+            await s.execute(delete(WikiRevision).where(WikiRevision.page_id == page.id))
+            await s.execute(delete(WikiCitation).where(WikiCitation.page_id == page.id))
+            await s.execute(
+                delete(WikiLink).where(WikiLink.wiki_id == w.id, WikiLink.from_page == slug)
+            )
+            await s.delete(page)
+            await s.commit()
+            wslug = w.slug
+        await self._changed("delete", slug, wslug)
+        return {"deleted": slug, "wiki": wslug}
 
     async def get_page(self, slug: str, wiki: str = DEFAULT_WIKI) -> dict[str, Any]:
         slug = slugify(slug)
@@ -295,13 +354,17 @@ class WikiStore:
                 "links_out": [{"to": t, "kind": k} for t, k in out_links],
             }
 
-    async def toc(self, wiki: str = DEFAULT_WIKI) -> list[dict[str, Any]]:
+    async def toc(self, wiki: str = DEFAULT_WIKI, archived: bool = False) -> list[dict[str, Any]]:
+        """Live pages by default; `archived=True` lists the archive instead."""
         async with self._sf() as s:
             w = await self._wiki_row(s, wiki)
+            cond = WikiPage.archived_at.is_not(None) if archived else WikiPage.archived_at.is_(None)
             pages = (
                 (
                     await s.execute(
-                        select(WikiPage).where(WikiPage.wiki_id == w.id).order_by(WikiPage.slug)
+                        select(WikiPage)
+                        .where(WikiPage.wiki_id == w.id, cond)
+                        .order_by(WikiPage.slug)
                     )
                 )
                 .scalars()
@@ -328,7 +391,13 @@ class WikiStore:
         async with self._sf() as s:
             w = await self._wiki_row(s, wiki)
             pages = (
-                (await s.execute(select(WikiPage).where(WikiPage.wiki_id == w.id)))
+                (
+                    await s.execute(
+                        select(WikiPage).where(
+                            WikiPage.wiki_id == w.id, WikiPage.archived_at.is_(None)
+                        )
+                    )
+                )
                 .scalars()
                 .all()
             )
@@ -343,9 +412,9 @@ class WikiStore:
         return [{**_page_meta(p, w.slug), "score": sc} for sc, p in scored[:limit]]
 
     async def count_pages(self, wiki: str | None = None) -> int:
-        """Total pages; scoped when `wiki` is given, across all wikis when None."""
+        """Live (non-archived) pages; scoped when `wiki` is given, all wikis when None."""
         async with self._sf() as s:
-            q = select(func.count(WikiPage.id))
+            q = select(func.count(WikiPage.id)).where(WikiPage.archived_at.is_(None))
             if wiki is not None:
                 w = await self._wiki_row(s, wiki)
                 q = q.where(WikiPage.wiki_id == w.id)

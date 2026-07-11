@@ -56,6 +56,11 @@ class WikiPage(Base):
     title: Mapped[str] = mapped_column(String(512), default="", nullable=False)
     summary: Mapped[str] = mapped_column(Text, default="", nullable=False)
     body: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    # set → page is archived: kept (with its revisions) but hidden from
+    # toc/search/injection. NULL = live. Hard delete removes the row.
+    archived_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, nullable=False
     )

@@ -60,6 +60,14 @@ async def _migrate_multi_wiki(engine, session_factory) -> None:
                 text(f"CREATE INDEX IF NOT EXISTS ix_{table}_wiki_id ON {table} (wiki_id)")
             )
 
+    async with engine.begin() as conn:
+        # 0.5.x → 0.6.0: archive support (archived_at NULL = live page)
+        cols = await conn.run_sync(lambda sc: _columns(sc, "wiki_pages"))
+        if "archived_at" not in cols:
+            ts = "TIMESTAMPTZ" if conn.dialect.name == "postgresql" else "TIMESTAMP"
+            await conn.execute(text(f"ALTER TABLE wiki_pages ADD COLUMN archived_at {ts}"))
+            log.info("wiki migration: added wiki_pages.archived_at")
+
     async with session_factory() as s:
         from sqlalchemy import select
 
@@ -82,7 +90,7 @@ class WikiPlugin(LunaPlugin):
         name="plugin-wiki",
         shown_name="Wiki",
         icon="book-open",
-        version="0.5.0",
+        version="0.6.0",
         description=(
             "Mission knowledge base: isolated wikis of pages, revisions, "
             "citations, open questions."
@@ -123,7 +131,7 @@ class WikiPlugin(LunaPlugin):
             registry.replace("wiki", provider)
         else:
             registry.register("wiki", provider)
-        log.info("plugin-wiki loaded (tools=12, tables=%d)", len(ALL_TABLES))
+        log.info("plugin-wiki loaded (tools=15, tables=%d)", len(ALL_TABLES))
 
     async def prompt_sections(self) -> list[str]:
         """Tier 1 (thin note) + tier 2 (per-wiki TOC/summaries, budget-capped).

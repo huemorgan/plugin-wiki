@@ -89,9 +89,11 @@ def register_routes(app, ctx):
             raise HTTPException(409, str(e)) from e
 
     @router.get("/pages")
-    async def list_pages(wiki: str = DEFAULT_WIKI, user=Depends(get_current_user)):
+    async def list_pages(
+        wiki: str = DEFAULT_WIKI, archived: bool = False, user=Depends(get_current_user)
+    ):
         try:
-            return await store.toc(wiki=wiki)
+            return await store.toc(wiki=wiki, archived=archived)
         except WikiNotFound as e:
             raise HTTPException(404, "wiki not found") from e
 
@@ -127,6 +129,10 @@ def register_routes(app, ctx):
             links = await store.links(wiki=wiki)
         except WikiNotFound as e:
             raise HTTPException(404, "wiki not found") from e
+        # archived pages keep their link rows but have no node — drop their
+        # outgoing edges so nothing dangles from a missing source
+        live = {p["slug"] for p in pages}
+        links = [l for l in links if l["from"] in live]
         nodes = [
             {"id": p["slug"], "label": p["title"] or p["slug"], "kind": "page",
              "summary": p["summary"], "updated_at": p["updated_at"]}

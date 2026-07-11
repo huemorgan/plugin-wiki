@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Search, BookOpen, ChevronDown, Plus, Library } from 'lucide-react'
 import {
+  fetchArchived,
   fetchGraph,
   fetchWikis,
   createWiki,
@@ -186,6 +187,7 @@ const slugifyClient = (raw: string) =>
 export function App() {
   const [view, setView] = useState<View>({ type: 'graph' })
   const [graph, setGraph] = useState<Graph | null>(null)
+  const [archived, setArchived] = useState<PageMeta[]>([])
   const [wikis, setWikis] = useState<WikiMeta[]>([])
   const [currentWiki, setCurrentWiki] = useState<string>(
     () => localStorage.getItem(WIKI_KEY) || 'main',
@@ -230,6 +232,9 @@ export function App() {
         setError(null)
       })
       .catch((e) => setError(String(e)))
+    fetchArchived(wikiRef.current)
+      .then(setArchived)
+      .catch(() => setArchived([]))
   }, [])
 
   useEffect(loadWikis, [loadWikis])
@@ -311,6 +316,10 @@ export function App() {
   const listPages = useMemo(
     () => pageNodes.map((n) => ({ slug: n.id, title: n.label })),
     [pageNodes],
+  )
+  const archivedPages = useMemo(
+    () => archived.map((p) => ({ slug: p.slug, title: p.title || p.slug })),
+    [archived],
   )
   const titleOf = useCallback(
     (slug: string) => pageNodes.find((n) => n.id === slug)?.label || slug,
@@ -511,6 +520,7 @@ export function App() {
                 >
                   <PageList
                     pages={listPages}
+                    archived={archivedPages}
                     topSlugs={topSlugs}
                     activeSlug={view.slug}
                     landed={landed}

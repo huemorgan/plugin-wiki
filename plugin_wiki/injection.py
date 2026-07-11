@@ -29,7 +29,8 @@ def tier1_note(page_count: int, open_questions: int, wiki_count: int = 1) -> str
         "them as you learn. Wikis map: `wiki_list_wikis`; pages map: `wiki_toc`; "
         "full page: `wiki_read`; write: `wiki_write`/`wiki_patch` (use [[slug]] "
         "links; pass `wiki` to target a specific wiki, new spaces via "
-        "`wiki_create_wiki`)."
+        "`wiki_create_wiki`). Retire stale pages with `wiki_archive_page` "
+        "(reversible), junk with `wiki_delete_page`."
     )
 
 

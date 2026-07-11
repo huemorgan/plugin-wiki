@@ -2,7 +2,9 @@
 plugin-owned tables, so all tools use the default auto_approve policy.
 
 0.4.0: every tool takes an optional `wiki` (slug, default `main`); three new
-tools let the agent create and navigate isolated wikis."""
+tools let the agent create and navigate isolated wikis.
+0.6.0: lifecycle tools — wiki_archive_page / wiki_unarchive_page (reversible,
+hidden from toc/search/injection) and wiki_delete_page (hard delete)."""
 
 from __future__ import annotations
 
@@ -40,9 +42,9 @@ def register_tools(ctx: PluginContext, store: WikiStore) -> None:
         except WikiNotFound:
             return await _no_such_wiki(wiki)
 
-    async def _toc(wiki: str = DEFAULT_WIKI) -> dict[str, Any]:
+    async def _toc(wiki: str = DEFAULT_WIKI, archived: bool = False) -> dict[str, Any]:
         try:
-            return {"wiki": wiki, "pages": await store.toc(wiki=wiki)}
+            return {"wiki": wiki, "pages": await store.toc(wiki=wiki, archived=archived)}
         except WikiNotFound:
             return await _no_such_wiki(wiki)
 
@@ -91,6 +93,30 @@ def register_tools(ctx: PluginContext, store: WikiStore) -> None:
             return {"error": f"no page '{slug}' in wiki '{wiki}'"}
         except ValueError as e:
             return {"error": str(e)}
+
+    async def _archive(slug: str, wiki: str = DEFAULT_WIKI) -> dict[str, Any]:
+        try:
+            return await store.set_archived(slug, True, wiki=wiki)
+        except WikiNotFound:
+            return await _no_such_wiki(wiki)
+        except PageNotFound:
+            return {"error": f"no page '{slug}' in wiki '{wiki}'"}
+
+    async def _unarchive(slug: str, wiki: str = DEFAULT_WIKI) -> dict[str, Any]:
+        try:
+            return await store.set_archived(slug, False, wiki=wiki)
+        except WikiNotFound:
+            return await _no_such_wiki(wiki)
+        except PageNotFound:
+            return {"error": f"no page '{slug}' in wiki '{wiki}'"}
+
+    async def _delete(slug: str, wiki: str = DEFAULT_WIKI) -> dict[str, Any]:
+        try:
+            return await store.delete_page(slug, wiki=wiki)
+        except WikiNotFound:
+            return await _no_such_wiki(wiki)
+        except PageNotFound:
+            return {"error": f"no page '{slug}' in wiki '{wiki}'"}
 
     async def _cite(slug: str, url: str, note: str = "", wiki: str = DEFAULT_WIKI) -> dict[str, Any]:
         try:
@@ -180,9 +206,20 @@ def register_tools(ctx: PluginContext, store: WikiStore) -> None:
                 name="wiki_toc",
                 description=(
                     "Table of contents of one wiki: every page's slug, title, and "
-                    "summary. The map — start here before reading or writing."
+                    "summary. The map — start here before reading or writing. "
+                    "Pass archived=true to list the archive instead."
                 ),
-                parameters={"type": "object", "properties": {"wiki": _WIKI_PARAM}},
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "wiki": _WIKI_PARAM,
+                        "archived": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": "List archived pages instead of live ones.",
+                        },
+                    },
+                },
             ),
             _toc,
         ),
@@ -260,6 +297,53 @@ def register_tools(ctx: PluginContext, store: WikiStore) -> None:
                 },
             ),
             _patch,
+        ),
+        (
+            ToolDef(
+                name="wiki_archive_page",
+                description=(
+                    "Archive a page: it disappears from the TOC, search, and your "
+                    "injected context but keeps its body, revisions, and citations. "
+                    "Reversible (wiki_unarchive_page; any wiki_write to the slug "
+                    "also revives it). Default choice for stale or superseded "
+                    "pages — prefer this over wiki_delete_page."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {"slug": {"type": "string"}, "wiki": _WIKI_PARAM},
+                    "required": ["slug"],
+                },
+            ),
+            _archive,
+        ),
+        (
+            ToolDef(
+                name="wiki_unarchive_page",
+                description="Restore an archived page to the live wiki (see wiki_toc with archived=true).",
+                parameters={
+                    "type": "object",
+                    "properties": {"slug": {"type": "string"}, "wiki": _WIKI_PARAM},
+                    "required": ["slug"],
+                },
+            ),
+            _unarchive,
+        ),
+        (
+            ToolDef(
+                name="wiki_delete_page",
+                description=(
+                    "Permanently delete a page with its revision history and "
+                    "citations. Irreversible — only for junk: empty stubs, "
+                    "duplicates, pages migrated elsewhere. For anything with "
+                    "real content, use wiki_archive_page instead."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {"slug": {"type": "string"}, "wiki": _WIKI_PARAM},
+                    "required": ["slug"],
+                },
+            ),
+            _delete,
         ),
         (
             ToolDef(
