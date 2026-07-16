@@ -90,7 +90,7 @@ class WikiPlugin(LunaPlugin):
         name="plugin-wiki",
         shown_name="Wiki",
         icon="book-open",
-        version="0.7.0",
+        version="0.7.1",
         description=(
             "Mission knowledge base: isolated wikis of pages, revisions, "
             "citations, open questions."

@@ -6,10 +6,24 @@
  * `{type:'luna-request-auth'}` back to get a fresh one. The postMessage is
  * the source of truth; localStorage('luna.token') is only a same-origin
  * fallback so the app also works opened directly (dev, dojo).
+ *
+ * 0.7.1: the localStorage fallback is DISABLED when embedded in an iframe.
+ * On hosted (luna.com.ai) localStorage is origin-wide across all agents, so
+ * that key holds whichever agent's token wrote it last — and the 401 retry
+ * used to short-circuit on the same stale value instead of waiting for the
+ * Shell's fresh postMessage. Embedded panes now trust postMessage only.
  */
 
 let token: string | null = null
 let waiters: ((t: string) => void)[] = []
+
+function embedded(): boolean {
+  try {
+    return window.self !== window.top
+  } catch {
+    return true // cross-origin parent → definitely an iframe
+  }
+}
 
 export function installAuthListener(): void {
   window.addEventListener('message', (e: MessageEvent) => {
@@ -30,6 +44,7 @@ export function requestAuth(): void {
 }
 
 function fallbackToken(): string | null {
+  if (embedded()) return null
   try {
     return localStorage.getItem('luna.token')
   } catch {
