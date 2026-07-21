@@ -107,6 +107,11 @@ class WikiPlugin(LunaPlugin):
 
     def __init__(self) -> None:
         self._store: WikiStore | None = None
+        # 045/phase03 (2c): prompt_sections ran a full per-wiki overview +
+        # open-questions scan EVERY turn (~514 ms, gating time-to-first-token
+        # in core). Every store mutation fires on_change, so the built
+        # sections are cached here and invalidated there.
+        self._sections_cache: list[str] | None = None
 
     async def on_load(self, ctx: PluginContext) -> None:
         async with ctx.engine.begin() as conn:
@@ -117,6 +122,9 @@ class WikiPlugin(LunaPlugin):
         await self._store.ensure_default_wiki()
 
         async def _on_change(evt: dict) -> None:
+            # 045/phase03 (2c): any wiki mutation invalidates the cached
+            # prompt sections before the live-update feed goes out.
+            self._sections_cache = None
             # live-update feed for the wiki pane (SSE /api/events?topics=wiki.*)
             await ctx.events.emit("wiki.updated", evt)
 
@@ -138,6 +146,8 @@ class WikiPlugin(LunaPlugin):
         Tier 3 (full bodies) only ever arrives via wiki_read tool results."""
         if self._store is None:
             return []
+        if self._sections_cache is not None:
+            return list(self._sections_cache)
         wikis = await self._store.overview()
         page_count = sum(len(w.get("pages") or []) for w in wikis)
         open_qs = len(await self._store.list_questions(status="open", wiki=None))
@@ -145,4 +155,5 @@ class WikiPlugin(LunaPlugin):
         toc = tier2_toc(wikis)
         if toc:
             sections.append(toc)
+        self._sections_cache = list(sections)
         return sections
