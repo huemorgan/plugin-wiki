@@ -13,6 +13,7 @@ import {
 import { subscribeWikiUpdates } from './lib/events'
 import { cn } from './lib/cn'
 import { GraphView } from './GraphView'
+import { WikiHome } from './WikiHome'
 import { PageView } from './PageView'
 import { PageList } from './PageList'
 import { flyTitles, reducedMotion, type Flight, type FlightRect } from './flight'
@@ -46,8 +47,8 @@ function WikiSwitcher({
   onCreate,
 }: {
   wikis: WikiMeta[]
-  current: string
-  onSwitch: (slug: string) => void
+  current: string | null
+  onSwitch: (slug: string | null) => void
   onCreate: (name: string, description: string) => Promise<void>
 }) {
   const [open, setOpen] = useState(false)
@@ -90,7 +91,7 @@ function WikiSwitcher({
         data-testid="wiki-switcher-button"
       >
         <Library size={12} className="text-luna-400" />
-        <span className="max-w-36 truncate">{cur?.name || current}</span>
+        <span className="max-w-36 truncate">{cur?.name || current || 'All wikis'}</span>
         <ChevronDown size={12} className="text-ink-500" />
       </button>
       {open && (
@@ -98,6 +99,20 @@ function WikiSwitcher({
           className="absolute top-full mt-1 left-0 w-72 bg-ink-900 border border-ink-700 rounded-md shadow-xl z-50 overflow-hidden"
           data-testid="wiki-switcher-menu"
         >
+          <button
+            onClick={() => {
+              onSwitch(null)
+              setOpen(false)
+            }}
+            data-testid="wiki-switcher-item-home"
+            className={
+              'block w-full text-left px-3 py-2 hover:bg-ink-800 border-b border-ink-800 ' +
+              (current === null ? 'bg-ink-800/60' : '')
+            }
+          >
+            <span className="text-xs text-ink-100">All wikis</span>
+            <span className="text-[10px] text-ink-500 ml-2">home</span>
+          </button>
           {wikis.map((wk) => (
             <button
               key={wk.slug}
@@ -189,12 +204,15 @@ export function App() {
   const [graph, setGraph] = useState<Graph | null>(null)
   const [archived, setArchived] = useState<PageMeta[]>([])
   const [wikis, setWikis] = useState<WikiMeta[]>([])
-  const [currentWiki, setCurrentWiki] = useState<string>(
-    () => localStorage.getItem(WIKI_KEY) || 'main',
+  // null = home page (004): the wiki library. Fresh loads land there unless
+  // a wiki was open last time.
+  const [currentWiki, setCurrentWiki] = useState<string | null>(
+    () => localStorage.getItem(WIKI_KEY) || null,
   )
   const [error, setError] = useState<string | null>(null)
   const [updatedSlug, setUpdatedSlug] = useState<string | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
+  const [homeRefresh, setHomeRefresh] = useState(0)
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<PageMeta[]>([])
   // choreography phases: slid drives the rail/panel/scrim transitions,
@@ -217,30 +235,34 @@ export function App() {
     fetchWikis()
       .then((ws) => {
         setWikis(ws)
-        // stale selection (deleted wiki / stale localStorage) → fall back
-        if (ws.length && !ws.some((w) => w.slug === wikiRef.current)) {
-          setCurrentWiki('main')
+        // stale selection (deleted wiki / stale localStorage) → home
+        if (wikiRef.current !== null && !ws.some((w) => w.slug === wikiRef.current)) {
+          setCurrentWiki(null)
         }
       })
       .catch(() => {})
   }, [])
 
   const loadGraph = useCallback(() => {
-    fetchGraph(wikiRef.current)
+    const wiki = wikiRef.current
+    if (wiki === null) return
+    fetchGraph(wiki)
       .then((g) => {
         setGraph(g)
         setError(null)
       })
       .catch((e) => setError(String(e)))
-    fetchArchived(wikiRef.current)
+    fetchArchived(wiki)
       .then(setArchived)
       .catch(() => setArchived([]))
   }, [])
 
   useEffect(loadWikis, [loadWikis])
   useEffect(() => {
-    localStorage.setItem(WIKI_KEY, currentWiki)
+    if (currentWiki === null) localStorage.removeItem(WIKI_KEY)
+    else localStorage.setItem(WIKI_KEY, currentWiki)
     setGraph(null)
+    setError(null)
     setView({ type: 'graph' })
     setSlid(false)
     setLanded(false)
@@ -255,6 +277,8 @@ export function App() {
   useEffect(() => {
     const unsub = subscribeWikiUpdates((u) => {
       loadWikis()
+      setHomeRefresh((k) => k + 1)
+      if (wikiRef.current === null) return
       if (u.wiki && u.wiki !== wikiRef.current) return
       const vt = viewRef.current.type
       if (vt === 'opening' || vt === 'closing') pendingGraph.current = true
@@ -283,6 +307,7 @@ export function App() {
       setResults([])
       return
     }
+    if (currentWiki === null) return
     const t = setTimeout(() => {
       searchPages(currentWiki, query)
         .then(setResults)
@@ -338,6 +363,12 @@ export function App() {
 
   const closePage = useCallback(() => {
     setView((v) => (v.type === 'page' ? { type: 'closing', slug: v.slug } : v))
+  }, [])
+
+  const goHome = useCallback(() => {
+    setQuery('')
+    setResults([])
+    setCurrentWiki(null)
   }, [])
 
   // Open choreography: slide overlays in, fly the top-10 titles from their
@@ -437,9 +468,10 @@ export function App() {
     <div className="h-full flex flex-col" data-testid="wiki-app">
       <header className="flex items-center gap-3 px-4 py-2.5 border-b border-ink-800 shrink-0">
         <button
-          onClick={closePage}
+          onClick={goHome}
           className="flex items-center gap-2 text-sm font-semibold text-ink-100 hover:text-luna-300"
           data-testid="wiki-home"
+          title="All wikis"
         >
           <BookOpen size={15} className="text-luna-400" /> Wiki
         </button>
@@ -449,6 +481,7 @@ export function App() {
           onSwitch={setCurrentWiki}
           onCreate={handleCreateWiki}
         />
+        {currentWiki !== null && (
         <div className="relative ml-auto w-64">
           <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-500" />
           <input
@@ -478,7 +511,8 @@ export function App() {
             </div>
           )}
         </div>
-        {graph && (
+        )}
+        {currentWiki !== null && graph && (
           <span className="text-[11px] text-ink-500 shrink-0" data-testid="wiki-page-count">
             {graph.nodes.filter((n) => n.kind === 'page').length} pages
           </span>
@@ -489,12 +523,20 @@ export function App() {
           compositor-only overlays (rail, panel, scrim, ghost layer) over it —
           its viewport, node positions and canvas are never reset. */}
       <main ref={mainRef} className="flex-1 min-h-0 relative overflow-hidden">
-        {error && (
+        {currentWiki === null && (
+          <WikiHome
+            wikis={wikis}
+            refreshKey={homeRefresh}
+            onOpen={setCurrentWiki}
+            onCreate={handleCreateWiki}
+          />
+        )}
+        {currentWiki !== null && error && (
           <div className="p-6 text-sm text-red-400" data-testid="wiki-error">
             {error}
           </div>
         )}
-        {!error && (
+        {currentWiki !== null && !error && (
           <>
             {!graph && <div className="p-6 text-sm text-ink-500">Loading graph…</div>}
             {graph && graph.nodes.length === 0 && (
@@ -538,7 +580,7 @@ export function App() {
                   }}
                 >
                   <PageView
-                    wiki={currentWiki}
+                    wiki={currentWiki!}
                     slug={view.slug}
                     refreshKey={refreshKey}
                     panelReady={panelReady}

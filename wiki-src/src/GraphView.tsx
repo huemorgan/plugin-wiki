@@ -13,6 +13,7 @@ import '@xyflow/react/dist/style.css'
 import { FileText, HelpCircle, Link2 } from 'lucide-react'
 import { cn } from './lib/cn'
 import type { Graph, GraphNode } from './lib/api'
+import { ringLayout } from './layout'
 
 type WikiNodeData = { node: GraphNode; justUpdated: boolean }
 
@@ -45,25 +46,15 @@ function WikiNode({ data }: NodeProps) {
 
 const nodeTypes = { wiki: WikiNode }
 
-/** Pages on an inner ring, stubs/sources on an outer ring — deterministic,
- * no layout lib needed at wiki scale (tens of pages). */
+/** Positions come from the shared condensed ring layout (004). */
 function layout(graph: Graph, updatedSlug: string | null): { nodes: Node[]; edges: Edge[] } {
-  const pages = graph.nodes.filter((n) => n.kind === 'page')
-  const rest = graph.nodes.filter((n) => n.kind !== 'page')
-  const place = (list: GraphNode[], radius: number, cx: number, cy: number): Node[] =>
-    list.map((n, i) => {
-      const angle = (2 * Math.PI * i) / Math.max(list.length, 1) - Math.PI / 2
-      return {
-        id: n.id,
-        type: 'wiki',
-        position: { x: cx + radius * Math.cos(angle), y: cy + radius * Math.sin(angle) },
-        data: { node: n, justUpdated: n.id === updatedSlug },
-      }
-    })
-  const nodes = [
-    ...place(pages, Math.max(160, pages.length * 32), 400, 300),
-    ...place(rest, Math.max(340, pages.length * 32 + 180), 400, 300),
-  ]
+  const { positions } = ringLayout(graph)
+  const nodes: Node[] = graph.nodes.map((n) => ({
+    id: n.id,
+    type: 'wiki',
+    position: positions.get(n.id) || { x: 0, y: 0 },
+    data: { node: n, justUpdated: n.id === updatedSlug },
+  }))
   const edges: Edge[] = graph.edges.map((e) => ({
     id: e.id,
     source: e.source,
@@ -125,6 +116,8 @@ export function GraphView({
         edges={edges}
         nodeTypes={nodeTypes}
         fitView
+        fitViewOptions={{ padding: 0.08 }}
+        minZoom={0.1}
         proOptions={{ hideAttribution: true }}
         nodesDraggable
         nodesConnectable={false}
