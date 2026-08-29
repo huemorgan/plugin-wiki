@@ -157,6 +157,7 @@ def register_tools(ctx: PluginContext, store: WikiStore) -> None:
         (
             ToolDef(
                 name="wiki_list_wikis",
+                modes=["planning", "building", "identify", "fix_approve", "fix_publish"],
                 description=(
                     "List all wikis: slug, name, description, page count. Wikis are "
                     "isolated knowledge spaces (a mission, a client, a domain each "
@@ -170,6 +171,7 @@ def register_tools(ctx: PluginContext, store: WikiStore) -> None:
         (
             ToolDef(
                 name="wiki_create_wiki",
+                modes=["planning", "building", "fix_approve", "fix_publish"],
                 description=(
                     "Create a new isolated wiki (e.g. for a new mission, client, or "
                     "domain). Pages, links, search, and questions never cross wiki "
@@ -191,6 +193,7 @@ def register_tools(ctx: PluginContext, store: WikiStore) -> None:
         (
             ToolDef(
                 name="wiki_update_wiki",
+                modes=["planning", "building", "fix_approve", "fix_publish"],
                 description=(
                     "Rename a wiki or refresh its description. Keep descriptions "
                     "current — they are the shelf labels used to route future "
@@ -211,6 +214,7 @@ def register_tools(ctx: PluginContext, store: WikiStore) -> None:
         (
             ToolDef(
                 name="wiki_toc",
+                modes=["planning", "building", "identify", "fix_approve", "fix_publish"],
                 description=(
                     "Table of contents of one wiki: every page's slug, title, and "
                     "summary. The map — start here before reading or writing. "
@@ -233,6 +237,7 @@ def register_tools(ctx: PluginContext, store: WikiStore) -> None:
         (
             ToolDef(
                 name="wiki_read",
+                modes=["planning", "building", "identify", "fix_approve", "fix_publish"],
                 description="Read a wiki page's full markdown body plus citations and outgoing links.",
                 parameters={
                     "type": "object",
@@ -245,6 +250,7 @@ def register_tools(ctx: PluginContext, store: WikiStore) -> None:
         (
             ToolDef(
                 name="wiki_search",
+                modes=["planning", "building", "identify", "fix_approve", "fix_publish"],
                 description=(
                     "Search one wiki's pages; returns relevance-ranked slugs + "
                     "summaries (use wiki_read for full bodies). Searches only the "
@@ -261,6 +267,7 @@ def register_tools(ctx: PluginContext, store: WikiStore) -> None:
         (
             ToolDef(
                 name="wiki_write",
+                modes=["planning", "building", "fix_approve", "fix_publish"],
                 description=(
                     "Create or fully replace a wiki page (markdown body). Link related "
                     "pages inline with [[slug]] wikilinks — they materialize the "
@@ -287,6 +294,7 @@ def register_tools(ctx: PluginContext, store: WikiStore) -> None:
         (
             ToolDef(
                 name="wiki_patch",
+                modes=["planning", "building", "fix_approve", "fix_publish"],
                 description=(
                     "Edit part of a page: replace `find` (must occur exactly once in "
                     "the body) with `replace`. Records a revision and re-derives "
@@ -310,6 +318,7 @@ def register_tools(ctx: PluginContext, store: WikiStore) -> None:
         (
             ToolDef(
                 name="wiki_archive_page",
+                modes=["planning", "building", "fix_approve", "fix_publish"],
                 description=(
                     "Archive a page: it disappears from the TOC, search, and your "
                     "injected context but keeps its body, revisions, and citations. "
@@ -328,6 +337,7 @@ def register_tools(ctx: PluginContext, store: WikiStore) -> None:
         (
             ToolDef(
                 name="wiki_unarchive_page",
+                modes=["planning", "building", "fix_approve", "fix_publish"],
                 description="Restore an archived page to the live wiki (see wiki_toc with archived=true).",
                 parameters={
                     "type": "object",
@@ -340,6 +350,7 @@ def register_tools(ctx: PluginContext, store: WikiStore) -> None:
         (
             ToolDef(
                 name="wiki_delete_page",
+                modes=["planning", "building", "fix_approve", "fix_publish"],
                 description=(
                     "Permanently delete a page with its revision history and "
                     "citations. Irreversible — only for junk: empty stubs, "
@@ -357,6 +368,7 @@ def register_tools(ctx: PluginContext, store: WikiStore) -> None:
         (
             ToolDef(
                 name="wiki_cite",
+                modes=["planning", "building", "fix_approve", "fix_publish"],
                 description="Attach a source URL to a page (evidence for a claim).",
                 parameters={
                     "type": "object",
@@ -374,6 +386,7 @@ def register_tools(ctx: PluginContext, store: WikiStore) -> None:
         (
             ToolDef(
                 name="wiki_ask",
+                modes=["planning", "building", "fix_approve", "fix_publish"],
                 description="Record an open question — something you don't know yet and want to research later. Optionally tie it to a page.",
                 parameters={
                     "type": "object",
@@ -390,6 +403,7 @@ def register_tools(ctx: PluginContext, store: WikiStore) -> None:
         (
             ToolDef(
                 name="wiki_resolve_question",
+                modes=["planning", "building", "fix_approve", "fix_publish"],
                 description="Mark an open question resolved (after writing the answer into a page).",
                 parameters={
                     "type": "object",
@@ -402,6 +416,7 @@ def register_tools(ctx: PluginContext, store: WikiStore) -> None:
         (
             ToolDef(
                 name="wiki_list_questions",
+                modes=["planning", "building", "identify", "fix_approve", "fix_publish"],
                 description="List open (or resolved) questions in one wiki.",
                 parameters={
                     "type": "object",
