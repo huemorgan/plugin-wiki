@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from .models import DEFAULT_WIKI
-from .store import PageNotFound, WikiNotFound, WikiStore
+from .store import PageNotFound, WikiNotFound, WikiStore, slugify
 
 _UI_DIR = Path(__file__).parent / "ui"
 _NO_CACHE = {"Cache-Control": "no-store"}
@@ -87,6 +87,26 @@ def register_routes(app, ctx):
             return await store.create_wiki(body.slug, body.name, description=body.description)
         except ValueError as e:
             raise HTTPException(409, str(e)) from e
+
+    @router.delete("/wikis/{wiki}")
+    async def delete_wiki(
+        wiki: str, purge_pages: bool = False, user=Depends(get_current_user)
+    ):
+        """Delete a wiki. Refuses `main` and non-empty wikis (store guards);
+        `?purge_pages=true` (owner REST only — never the agent tool) deletes
+        remaining pages first, archived ones included."""
+        if slugify(wiki) == DEFAULT_WIKI:
+            raise HTTPException(400, "the main wiki cannot be deleted")
+        try:
+            if purge_pages:
+                for archived in (False, True):
+                    for p in await store.toc(wiki=wiki, archived=archived):
+                        await store.delete_page(p["slug"], wiki=wiki)
+            return await store.delete_wiki(wiki)
+        except WikiNotFound as e:
+            raise HTTPException(404, "wiki not found") from e
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
 
     @router.get("/pages")
     async def list_pages(

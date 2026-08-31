@@ -18,6 +18,7 @@ READ_MODES = ["planning", "building", "identify", "fix_approve", "fix_publish"]
 WRITE_TOOLS = {
     "wiki_create_wiki",
     "wiki_update_wiki",
+    "wiki_delete_wiki",
     "wiki_write",
     "wiki_patch",
     "wiki_archive_page",

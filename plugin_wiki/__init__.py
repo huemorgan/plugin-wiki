@@ -90,7 +90,7 @@ class WikiPlugin(LunaPlugin):
         name="plugin-wiki",
         shown_name="Wiki",
         icon="book-open",
-        version="0.9.0",
+        version="0.10.0",
         description=(
             "Mission knowledge base: isolated wikis of pages, revisions, "
             "citations, open questions."
@@ -139,7 +139,7 @@ class WikiPlugin(LunaPlugin):
             registry.replace("wiki", provider)
         else:
             registry.register("wiki", provider)
-        log.info("plugin-wiki loaded (tools=15, tables=%d)", len(ALL_TABLES))
+        log.info("plugin-wiki loaded (tools=16, tables=%d)", len(ALL_TABLES))
 
     async def prompt_sections(self) -> list[str]:
         """Tier 1 (thin note) + tier 2 (per-wiki TOC/summaries, budget-capped).

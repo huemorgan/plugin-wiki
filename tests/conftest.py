@@ -49,6 +49,10 @@ def _install_luna_sdk_stub() -> None:
 
         return Base
 
+    def get_current_user():  # route Depends() stand-in — no auth in tests
+        return {"id": "test-user"}
+
+    mod.get_current_user = get_current_user
     mod.LunaPlugin = LunaPlugin
     mod.PluginContext = PluginContext
     mod.PluginManifest = PluginManifest

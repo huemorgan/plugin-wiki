@@ -1,11 +1,14 @@
 """Agent-facing wiki tools. Thin handlers over WikiStore. Writes touch only
-plugin-owned tables, so all tools use the default auto_approve policy.
+plugin-owned tables, so tools use the default auto_approve policy
+(wiki_delete_wiki excepted: ask/high).
 
 0.4.0: every tool takes an optional `wiki` (slug, default `main`); three new
 tools let the agent create and navigate isolated wikis.
 0.6.0: lifecycle tools — wiki_archive_page / wiki_unarchive_page (reversible,
 hidden from toc/search/injection) and wiki_delete_page (hard delete).
-0.7.0: `reason` accepted as an alias for `note` on wiki_write / wiki_patch."""
+0.7.0: `reason` accepted as an alias for `note` on wiki_write / wiki_patch.
+0.10.0: wiki_delete_wiki — guarded (ask policy; refuses main and non-empty
+wikis), so a junk wiki can finally be removed."""
 
 from __future__ import annotations
 
@@ -42,6 +45,14 @@ def register_tools(ctx: PluginContext, store: WikiStore) -> None:
             return await store.update_wiki(wiki, name=name, description=description)
         except WikiNotFound:
             return await _no_such_wiki(wiki)
+
+    async def _delete_wiki(wiki: str) -> dict[str, Any]:
+        try:
+            return await store.delete_wiki(wiki)
+        except WikiNotFound:
+            return await _no_such_wiki(wiki)
+        except ValueError as e:
+            return {"error": str(e)}
 
     async def _toc(wiki: str = DEFAULT_WIKI, archived: bool = False) -> dict[str, Any]:
         try:
@@ -210,6 +221,29 @@ def register_tools(ctx: PluginContext, store: WikiStore) -> None:
                 },
             ),
             _update_wiki,
+        ),
+        (
+            ToolDef(
+                name="wiki_delete_wiki",
+                modes=["planning", "building", "fix_approve", "fix_publish"],
+                description=(
+                    "Permanently delete an empty wiki. Only for junk: a wiki "
+                    "created by mistake or already emptied. Refuses the main "
+                    "wiki and any wiki that still has pages (archived ones "
+                    "count) — empty it first, page-by-page, with "
+                    "wiki_delete_page."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "wiki": {"type": "string", "description": "Wiki slug to delete."},
+                    },
+                    "required": ["wiki"],
+                },
+                policy="ask",
+                risk_level="high",
+            ),
+            _delete_wiki,
         ),
         (
             ToolDef(
